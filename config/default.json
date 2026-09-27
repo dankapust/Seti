@@ -1,14 +1,15 @@
 {
-  "node_id_bits": 256,
-  "k_bucket_size": 4,
-  "alpha": 3,
-  "replication_factor": 3,
-  "record_ttl": 300,
-  "refresh_interval": 120,
-  "republish_interval": 120,
-  "network_timeout": 5.0,
-  "max_frame_payload": 65536,
-  "tunnel_hops": 3,
-  "tunnel_pool_size": 3,
-  "max_file_chunk_size": 49152
+  "NODE_STATE_DIR": "./state/node",
+  "LISTEN_HOST": "0.0.0.0",
+  "LISTEN_PORT": 9101,
+  "BOOTSTRAP_PEERS": [],
+  "NODE_ID_BITS": 256,
+  "K_BUCKET_SIZE": 4,
+  "ALPHA": 3,
+  "CONNECT_TIMEOUT_MS": 3000,
+  "READ_TIMEOUT_MS": 5000,
+  "PING_TIMEOUT_MS": 5000,
+  "MAX_FRAME_PAYLOAD": 65536,
+  "PROTOCOL_VERSION": 1,
+  "LOG_LEVEL": "INFO"
 }

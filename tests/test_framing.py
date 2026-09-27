@@ -11,7 +11,13 @@ from src.transport import (
     PROTOCOL_VERSION,
     MAX_FRAME_PAYLOAD,
 )
-from src.transport.protocol import PayloadLengthExceededError, FramingError, HEADER_SIZE, HEADER_FORMAT
+from src.transport.protocol import (
+    PayloadLengthExceededError, 
+    FramingError, 
+    InvalidProtocolVersionError,
+    HEADER_SIZE, 
+    HEADER_FORMAT
+)
 
 @pytest.mark.asyncio
 async def test_frame_encoding_decoding():
@@ -110,3 +116,31 @@ async def test_stream_framing_concatenated_and_partial():
         recv_data = server_received_frames[i].unpack_data()
         assert recv_data["seq"] == i
         assert recv_data["content"] == "A" * (i * 50)
+
+@pytest.mark.asyncio
+async def test_invalid_protocol_version():
+    """Тест T1.7: Неизвестная версия протокола отклоняется"""
+    bad_header = struct.pack(
+        HEADER_FORMAT,
+        99, # Неверная версия
+        int(MessageType.PING),
+        int(FrameFlags.NONE),
+        uuid.uuid4().bytes,
+        50,
+    )
+    with pytest.raises(InvalidProtocolVersionError):
+        Frame.decode_header(bad_header)
+
+@pytest.mark.asyncio
+async def test_invalid_message_type():
+    """Тест T1.8: Неизвестный тип сообщения отклоняется"""
+    bad_header = struct.pack(
+        HEADER_FORMAT,
+        PROTOCOL_VERSION,
+        99, # Неверный тип
+        int(FrameFlags.NONE),
+        uuid.uuid4().bytes,
+        50,
+    )
+    with pytest.raises(FramingError, match="Unknown message type"):
+        Frame.decode_header(bad_header)

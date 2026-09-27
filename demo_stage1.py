@@ -88,6 +88,16 @@ class SimpleNode:
                     await self.dispatcher.dispatch(conn, frame)
             except Exception as e:
                 logger.error(f"[{self.name}] Ошибка обработки соединения: {e}")
+                # Попытка отправить ERROR перед закрытием, как требует ТЗ
+                try:
+                    err_frame = Frame.pack_data(
+                        msg_type=MessageType.ERROR,
+                        data={"code": "PROTOCOL_ERROR", "message": str(e)},
+                        flags=FrameFlags.ERROR
+                    )
+                    await conn.send_frame(err_frame)
+                except Exception:
+                    pass # Соединение уже может быть разорвано
             finally:
                 await conn.close()
 

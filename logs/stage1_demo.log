@@ -36,3 +36,22 @@
 2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_B (Client)] [RECV APP_ACK] Подтверждение: {'status': 'RECEIVED', 'msg_id': 'msg-999'}
 2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [NODE STOPPED] Узел остановлен
 2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [DISCONNECT] Соединение с ('127.0.0.1', 55598) закрыто
+2026-09-27 22:04:33,265 [INFO] (NodeDemo) [Node_A (Server)] [NODE STARTED] Узел слушает порт 127.0.0.1:8001
+2026-09-27 22:04:33,265 [INFO] (NodeDemo) [Node_B (Client)] [TCP CONNECTING] к Node_A (127.0.0.1:8001)...
+2026-09-27 22:04:33,265 [INFO] (NodeDemo) [Node_A (Server)] [CONNECT] Новое входящее TCP-соединение от ('127.0.0.1', 56593)
+2026-09-27 22:04:33,265 [INFO] (NodeDemo) [Node_B (Client)] [CONNECTED] Узлы установили TCP-соединение!
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_B (Client)] [FRAME PACKED] PING. Размер: 79 Б (Header: 24Б + Payload: 55Б)
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_B (Client)] [RAW HEADER HEX] (первые 24 байта): 01010000d1a2e2a713f1480eabd2ea254c9f6fc800000037
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_B (Client)] [SEND FRAME] PING отправлен в сеть
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_A (Server)] [HEADER DISSECT] 24 байта: Ver=1, Type=PING(1), ReqID=d1a2e2a7..., PayloadLen=55 байт
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_A (Server)] [RECV PING] от 'Node_B'. Данные: {'sender': 'Node_B', 'text': 'Привет от узла B!', 'seq': 1}
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_A (Server)] [SEND PONG] ответ (req_id=d1a2e2a7...)
+2026-09-27 22:04:33,270 [INFO] (NodeDemo) [Node_B (Client)] [RECV PONG] Узел B получил ответ PONG от Узла A!
+2026-09-27 22:04:33,273 [INFO] (NodeDemo) [Node_B (Client)] [UNPACKED PAYLOAD] {'sender': 'Node_A (Server)', 'status': 'OK', 'echo': {'sender': 'Node_B', 'text': 'Привет от узла B!', 'seq': 1}}
+2026-09-27 22:04:33,273 [INFO] (NodeDemo) [Node_B (Client)] [SEND APP_MESSAGE] (Payload len: 1040 байт)...
+2026-09-27 22:04:33,274 [INFO] (NodeDemo) [Node_A (Server)] [HEADER DISSECT] 24 байта: Ver=1, Type=APP_MESSAGE(15), ReqID=a4695bde..., PayloadLen=1040 байт
+2026-09-27 22:04:33,275 [INFO] (NodeDemo) [Node_A (Server)] [RECV APP_MESSAGE]: id=msg-999, len=1000
+2026-09-27 22:04:33,275 [INFO] (NodeDemo) [Node_A (Server)] [SEND APP_ACK] подтверждение
+2026-09-27 22:04:33,275 [INFO] (NodeDemo) [Node_B (Client)] [RECV APP_ACK] Подтверждение: {'status': 'RECEIVED', 'msg_id': 'msg-999'}
+2026-09-27 22:04:33,276 [INFO] (NodeDemo) [Node_A (Server)] [NODE STOPPED] Узел остановлен
+2026-09-27 22:04:33,279 [INFO] (NodeDemo) [Node_A (Server)] [DISCONNECT] Соединение с ('127.0.0.1', 56593) закрыто
