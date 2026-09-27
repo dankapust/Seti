@@ -1,0 +1,17 @@
+services:
+  stage1_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage1_tests
+    environment:
+      - PYTHONPATH=/app
+
+  stage1_demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage1_demo
+    command: ["python", "demo_stage1.py"]
+    environment:
+      - PYTHONPATH=/app

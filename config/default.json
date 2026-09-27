@@ -1,0 +1,14 @@
+{
+  "node_id_bits": 256,
+  "k_bucket_size": 4,
+  "alpha": 3,
+  "replication_factor": 3,
+  "record_ttl": 300,
+  "refresh_interval": 120,
+  "republish_interval": 120,
+  "network_timeout": 5.0,
+  "max_frame_payload": 65536,
+  "tunnel_hops": 3,
+  "tunnel_pool_size": 3,
+  "max_file_chunk_size": 49152
+}

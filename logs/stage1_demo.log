@@ -1,0 +1,38 @@
+2026-09-14 10:13:29,505 [INFO] (NodeDemo) [Node_A (Server)] 🚀 Узел успешно запущен и слушает порт 127.0.0.1:8001
+2026-09-14 10:13:29,511 [INFO] (NodeDemo) [Node_B (Client)] 🔗 Установка исходящего TCP-соединения с Node_A (127.0.0.1:8001)...
+2026-09-14 10:13:29,512 [INFO] (NodeDemo) [Node_A (Server)] 🔌 Новое входящее TCP-соединение от ('127.0.0.1', 51505)
+2026-09-14 10:13:29,512 [INFO] (NodeDemo) [Node_B (Client)] ✅ Узлы успешно увидели друг друга и установили TCP-соединение!
+2026-09-14 10:13:29,513 [INFO] (NodeDemo) [Node_B (Client)] 📦 Сформирован кадр PING. Общий размер: 79 байт (Заголовок: 24Б + Payload: 55Б)
+2026-09-14 10:13:29,514 [INFO] (NodeDemo) [Node_B (Client)] 🧬 Дамп первых 24 байт заголовка (HEX): 01010000f1ba2a2eb00f4e6bb92111b60d58a00200000037
+2026-09-14 10:13:29,514 [INFO] (NodeDemo) [Node_B (Client)] 📤 Кадр PING отправлен в сеть
+2026-09-14 10:13:29,514 [INFO] (NodeDemo) [Node_A (Server)] 🔍 Разбор 24-байтового заголовка: Ver=1, Type=PING(1), ReqID=f1ba2a2e..., PayloadLen=55 bytes
+2026-09-14 10:13:29,514 [INFO] (NodeDemo) [Node_A (Server)] 📥 Получен PING от 'Node_B'. Данные: {'sender': 'Node_B', 'text': 'Привет от узла B!', 'seq': 1}
+2026-09-14 10:13:29,514 [INFO] (NodeDemo) [Node_A (Server)] 📤 Отправка PONG ответа (req_id=f1ba2a2e...)
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_B (Client)] 📥 Узел B получил ответ PONG от Узла A!
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_B (Client)] 📄 Содержимое ответа: {'sender': 'Node_A (Server)', 'status': 'OK', 'echo': {'sender': 'Node_B', 'text': 'Привет от узла B!', 'seq': 1}}
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_B (Client)] 📦 Отправка прикладного кадра APP_MESSAGE (Payload: 1040 байт)...
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_A (Server)] 🔍 Разбор 24-байтового заголовка: Ver=1, Type=APP_MESSAGE(15), ReqID=72e94727..., PayloadLen=1040 bytes
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_A (Server)] 📥 Получено прикладное сообщение (APP_MESSAGE): {'id': 'msg-999', 'content': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', 'meta': {'encrypted': False}}
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_A (Server)] 📤 Отправка подтверждения APP_ACK
+2026-09-14 10:13:29,515 [INFO] (NodeDemo) [Node_B (Client)] 📥 Получено подтверждение APP_ACK: {'status': 'RECEIVED', 'msg_id': 'msg-999'}
+2026-09-14 10:13:29,516 [INFO] (NodeDemo) [Node_A (Server)] 🛑 Узел остановлен
+2026-09-14 10:13:29,516 [INFO] (NodeDemo) [Node_A (Server)] 🔌 Соединение с ('127.0.0.1', 51505) закрыто удаленной стороной
+2026-09-14 10:13:52,458 [INFO] (NodeDemo) [Node_A (Server)] [NODE STARTED] Узел слушает порт 127.0.0.1:8001
+2026-09-14 10:13:52,459 [INFO] (NodeDemo) [Node_B (Client)] [TCP CONNECTING] к Node_A (127.0.0.1:8001)...
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_A (Server)] [CONNECT] Новое входящее TCP-соединение от ('127.0.0.1', 55598)
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_B (Client)] [CONNECTED] Узлы установили TCP-соединение!
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_B (Client)] [FRAME PACKED] PING. Размер: 79 Б (Header: 24Б + Payload: 55Б)
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_B (Client)] [RAW HEADER HEX] (первые 24 байта): 010100000f2ea395e8254666a10d9cd606fb896200000037
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_B (Client)] [SEND FRAME] PING отправлен в сеть
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_A (Server)] [HEADER DISSECT] 24 байта: Ver=1, Type=PING(1), ReqID=0f2ea395..., PayloadLen=55 байт
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_A (Server)] [RECV PING] от 'Node_B'. Данные: {'sender': 'Node_B', 'text': 'Привет от узла B!', 'seq': 1}
+2026-09-14 10:13:52,460 [INFO] (NodeDemo) [Node_A (Server)] [SEND PONG] ответ (req_id=0f2ea395...)
+2026-09-14 10:13:52,461 [INFO] (NodeDemo) [Node_B (Client)] [RECV PONG] Узел B получил ответ PONG от Узла A!
+2026-09-14 10:13:52,461 [INFO] (NodeDemo) [Node_B (Client)] [UNPACKED PAYLOAD] {'sender': 'Node_A (Server)', 'status': 'OK', 'echo': {'sender': 'Node_B', 'text': 'Привет от узла B!', 'seq': 1}}
+2026-09-14 10:13:52,461 [INFO] (NodeDemo) [Node_B (Client)] [SEND APP_MESSAGE] (Payload len: 1040 байт)...
+2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [HEADER DISSECT] 24 байта: Ver=1, Type=APP_MESSAGE(15), ReqID=0fcb16a3..., PayloadLen=1040 байт
+2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [RECV APP_MESSAGE]: id=msg-999, len=1000
+2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [SEND APP_ACK] подтверждение
+2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_B (Client)] [RECV APP_ACK] Подтверждение: {'status': 'RECEIVED', 'msg_id': 'msg-999'}
+2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [NODE STOPPED] Узел остановлен
+2026-09-14 10:13:52,462 [INFO] (NodeDemo) [Node_A (Server)] [DISCONNECT] Соединение с ('127.0.0.1', 55598) закрыто
