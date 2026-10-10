@@ -10,11 +10,12 @@ from src.transport import (
     Dispatcher,
     PROTOCOL_VERSION,
     MAX_FRAME_PAYLOAD,
+    FramingError,
+    PayloadLengthExceededError,
+    InvalidProtocolVersionError,
+    ReadTimeoutError,
 )
 from src.transport.protocol import (
-    PayloadLengthExceededError, 
-    FramingError, 
-    InvalidProtocolVersionError,
     HEADER_SIZE, 
     HEADER_FORMAT
 )
@@ -119,10 +120,10 @@ async def test_stream_framing_concatenated_and_partial():
 
 @pytest.mark.asyncio
 async def test_invalid_protocol_version():
-    """Тест T1.7: Неизвестная версия протокола отклоняется"""
+    """Test protocol version validation"""
     bad_header = struct.pack(
         HEADER_FORMAT,
-        99, # Неверная версия
+        99, # Invalid version
         int(MessageType.PING),
         int(FrameFlags.NONE),
         uuid.uuid4().bytes,
@@ -133,14 +134,108 @@ async def test_invalid_protocol_version():
 
 @pytest.mark.asyncio
 async def test_invalid_message_type():
-    """Тест T1.8: Неизвестный тип сообщения отклоняется"""
+    """Test invalid message type error"""
     bad_header = struct.pack(
         HEADER_FORMAT,
         PROTOCOL_VERSION,
-        99, # Неверный тип
+        99, # Invalid type
         int(FrameFlags.NONE),
         uuid.uuid4().bytes,
         50,
     )
     with pytest.raises(FramingError, match="Unknown message type"):
         Frame.decode_header(bad_header)
+
+@pytest.mark.asyncio
+async def test_independent_nodes_different_ports_concurrent():
+    """E1-1 / E1-8: Test independent simultaneous processes/servers running on different ports concurrently."""
+    nodes_received = {}
+
+    def make_node_server(node_name):
+        async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+            conn = Connection(reader, writer)
+            frame = await conn.read_frame()
+            if frame:
+                nodes_received[node_name] = frame.unpack_data()
+                pong = Frame.pack_data(
+                    msg_type=MessageType.PONG,
+                    data={"responder": node_name, "status": "OK"},
+                    request_id=frame.request_id,
+                )
+                await conn.send_frame(pong)
+            await conn.close()
+        return handle_client
+
+    server1 = await asyncio.start_server(make_node_server("node_8101"), "127.0.0.1", 0)
+    server2 = await asyncio.start_server(make_node_server("node_8102"), "127.0.0.1", 0)
+    port1 = server1.sockets[0].getsockname()[1]
+    port2 = server2.sockets[0].getsockname()[1]
+
+    async def send_to(port, sender_id):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        conn = Connection(reader, writer)
+        frame = Frame.pack_data(MessageType.PING, {"sender": sender_id})
+        await conn.send_frame(frame)
+        resp = await conn.read_frame(timeout=2.0)
+        await conn.close()
+        return resp.unpack_data()
+
+    res1, res2 = await asyncio.gather(
+        send_to(port1, "client_A"),
+        send_to(port2, "client_B"),
+    )
+
+    server1.close()
+    server2.close()
+    await server1.wait_closed()
+    await server2.wait_closed()
+
+    assert nodes_received["node_8101"] == {"sender": "client_A"}
+    assert nodes_received["node_8102"] == {"sender": "client_B"}
+    assert res1["responder"] == "node_8101"
+    assert res2["responder"] == "node_8102"
+
+@pytest.mark.asyncio
+async def test_read_frame_timeout():
+    """E1-3 / E1-8: Test read_frame timeout raises ReadTimeoutError."""
+    async def silent_server(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        conn = Connection(reader, writer)
+        await asyncio.sleep(2.0)
+        await conn.close()
+
+    server = await asyncio.start_server(silent_server, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    async with server:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        conn = Connection(reader, writer)
+
+        with pytest.raises((ReadTimeoutError, asyncio.TimeoutError)):
+            await conn.read_frame(timeout=0.1)
+
+        await conn.close()
+
+@pytest.mark.asyncio
+async def test_dispatcher_error_handling():
+    """E1-6 / E1-8: Test dispatcher sending ERROR frame when handler or unknown msg type occurs."""
+    dispatcher = Dispatcher()
+
+    async def faulty_handler(conn: Connection, frame: Frame):
+        raise ValueError("Simulated handler exception")
+
+    dispatcher.register(MessageType.PING, faulty_handler)
+
+    sent_frames = []
+
+    class MockConnection:
+        async def send_frame(self, frame: Frame):
+            sent_frames.append(frame)
+
+    mock_conn = MockConnection()
+    ping_frame = Frame.pack_data(MessageType.PING, {"test": True})
+    await dispatcher.dispatch(mock_conn, ping_frame)
+
+    assert len(sent_frames) == 1
+    assert sent_frames[0].msg_type == MessageType.ERROR
+    assert sent_frames[0].flags == FrameFlags.ERROR
+    assert "Simulated handler exception" in sent_frames[0].unpack_data()["error"]

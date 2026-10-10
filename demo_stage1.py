@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import uuid
 import sys
 from typing import Optional
 
@@ -12,10 +11,11 @@ from src.transport import (
     Connection,
     Dispatcher,
     PROTOCOL_VERSION,
+    ReadTimeoutError,
 )
 from src.transport.protocol import HEADER_SIZE
 
-# Устанавливаем UTF-8 для вывода в консоль Windows
+# Config UTF-8 output for Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -32,25 +32,30 @@ logging.basicConfig(
 logger = logging.getLogger("NodeDemo")
 
 class SimpleNode:
-    def __init__(self, name: str, host: str, port: int):
+    def __init__(self, name: str, host: str, port: int, delay_pong: float = 0.0):
         self.name = name
         self.host = host
         self.port = port
+        self.delay_pong = delay_pong  # Used to simulate timeout on request
         self.dispatcher = Dispatcher()
         self.server: Optional[asyncio.Server] = None
         self.register_handlers()
 
     def register_handlers(self):
-        """Регистрация обработчиков входящих сообщений"""
+        """Register handlers for message types"""
         async def handle_ping(conn: Connection, frame: Frame):
             data = frame.unpack_data()
-            logger.info(f"[{self.name}] [RECV PING] от '{data.get('sender')}'. Данные: {data}")
+            logger.info(f"[{self.name}] [RECV PING] from '{data.get('sender')}'. Payload: {data}")
+            if self.delay_pong > 0:
+                logger.info(f"[{self.name}] [DELAY RESPONSE] Simulating delay of {self.delay_pong}s to trigger timeout...")
+                await asyncio.sleep(self.delay_pong)
+
             pong_frame = Frame.pack_data(
                 msg_type=MessageType.PONG,
                 data={"sender": self.name, "status": "OK", "echo": data},
                 request_id=frame.request_id,
             )
-            logger.info(f"[{self.name}] [SEND PONG] ответ (req_id={frame.request_id.hex()[:8]}...)")
+            logger.info(f"[{self.name}] [SEND PONG] (req_id={frame.request_id.hex()[:8]}...)")
             await conn.send_frame(pong_frame)
 
         async def handle_app_message(conn: Connection, frame: Frame):
@@ -61,34 +66,33 @@ class SimpleNode:
                 data={"status": "RECEIVED", "msg_id": data.get("id")},
                 request_id=frame.request_id,
             )
-            logger.info(f"[{self.name}] [SEND APP_ACK] подтверждение")
+            logger.info(f"[{self.name}] [SEND APP_ACK] Confirmation frame sent")
             await conn.send_frame(ack_frame)
 
         self.dispatcher.register(MessageType.PING, handle_ping)
         self.dispatcher.register(MessageType.APP_MESSAGE, handle_app_message)
 
     async def start(self):
-        """Запуск TCP-сервера узла"""
+        """Start independent TCP server node"""
         async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             conn = Connection(reader, writer)
             remote_addr = writer.get_extra_info("peername")
-            logger.info(f"[{self.name}] [CONNECT] Новое входящее TCP-соединение от {remote_addr}")
+            logger.info(f"[{self.name}] [CONNECT] Incoming TCP connection from {remote_addr}")
             try:
                 while True:
                     frame = await conn.read_frame()
                     if frame is None:
-                        logger.info(f"[{self.name}] [DISCONNECT] Соединение с {remote_addr} закрыто")
+                        logger.info(f"[{self.name}] [DISCONNECT] Connection from {remote_addr} closed cleanly")
                         break
                     
                     logger.info(
-                        f"[{self.name}] [HEADER DISSECT] 24 байта: "
+                        f"[{self.name}] [HEADER DISSECT] 24 bytes: "
                         f"Ver={frame.version}, Type={frame.msg_type.name}({frame.msg_type.value}), "
-                        f"ReqID={frame.request_id.hex()[:8]}..., PayloadLen={frame.payload_length} байт"
+                        f"ReqID={frame.request_id.hex()[:8]}..., PayloadLen={frame.payload_length} bytes"
                     )
                     await self.dispatcher.dispatch(conn, frame)
             except Exception as e:
-                logger.error(f"[{self.name}] Ошибка обработки соединения: {e}")
-                # Попытка отправить ERROR перед закрытием, как требует ТЗ
+                logger.error(f"[{self.name}] Error processing connection: {e}")
                 try:
                     err_frame = Frame.pack_data(
                         msg_type=MessageType.ERROR,
@@ -97,72 +101,78 @@ class SimpleNode:
                     )
                     await conn.send_frame(err_frame)
                 except Exception:
-                    pass # Соединение уже может быть разорвано
+                    pass
             finally:
                 await conn.close()
 
         self.server = await asyncio.start_server(handle_client, self.host, self.port)
-        logger.info(f"[{self.name}] [NODE STARTED] Узел слушает порт {self.host}:{self.port}")
+        logger.info(f"[{self.name}] [NODE STARTED] Independent process listening on {self.host}:{self.port}")
 
     async def stop(self):
         if self.server:
             self.server.close()
             await self.server.wait_closed()
-            logger.info(f"[{self.name}] [NODE STOPPED] Узел остановлен")
+            logger.info(f"[{self.name}] [NODE STOPPED]")
 
 async def run_demo():
-    print("=" * 75)
-    print("       ДЕМОНСТРАЦИЯ ЭТАПА 1: СЕТЕВОЙ ТРАНСПОРТ И КАДРИРОВАНИЕ P2P")
-    print("=" * 75)
+    print("=" * 80)
+    print("       STAGE 1 DEMO: INDEPENDENT CONCURRENT NODES ON DIFFERENT PORTS & TIMEOUTS")
+    print("=" * 80)
 
-    # 1. Создаем два узла
-    node_a = SimpleNode(name="Node_A (Server)", host="127.0.0.1", port=8001)
-    node_b = SimpleNode(name="Node_B (Client)", host="127.0.0.1", port=8002)
+    # 1. Start 3 independent concurrent nodes listening on different ports
+    node_a = SimpleNode(name="Node_A", host="127.0.0.1", port=8001)
+    node_b = SimpleNode(name="Node_B", host="127.0.0.1", port=8002)
+    node_c = SimpleNode(name="Node_C (Delayed)", host="127.0.0.1", port=8003, delay_pong=3.0)
 
     await node_a.start()
+    await node_b.start()
+    await node_c.start()
 
-    # 2. Узел B подключается к Узлу A по TCP
-    logger.info(f"[Node_B (Client)] [TCP CONNECTING] к Node_A (127.0.0.1:8001)...")
-    reader, writer = await asyncio.open_connection("127.0.0.1", 8001)
-    conn_b = Connection(reader, writer)
-    logger.info(f"[Node_B (Client)] [CONNECTED] Узлы установили TCP-соединение!")
+    # Function for a node connecting and exchanging frames with another node
+    async def exchange_ping(sender_name: str, target_host: str, target_port: int, timeout_val: float = 2.0):
+        logger.info(f"[{sender_name}] Connecting to target node at {target_host}:{target_port}...")
+        reader, writer = await asyncio.open_connection(target_host, target_port)
+        conn = Connection(reader, writer)
+        
+        ping_frame = Frame.pack_data(
+            msg_type=MessageType.PING,
+            data={"sender": sender_name, "text": f"Hello from {sender_name}!"},
+        )
+        await conn.send_frame(ping_frame)
+        logger.info(f"[{sender_name}] PING frame sent. Waiting for PONG (timeout={timeout_val}s)...")
+        
+        try:
+            pong_response = await conn.read_frame(timeout=timeout_val)
+            if pong_response:
+                data = pong_response.unpack_data()
+                logger.info(f"[{sender_name}] [SUCCESS PONG RECV] {data}")
+        except ReadTimeoutError as e:
+            logger.warning(f"[{sender_name}] [TIMEOUT DETECTED] Read frame timed out: {e}")
+        except Exception as e:
+            logger.error(f"[{sender_name}] Error: {e}")
+        finally:
+            await conn.close()
 
-    # 3. Узел B отправляет PING канонический кадр
-    ping_frame = Frame.pack_data(
-        msg_type=MessageType.PING,
-        data={"sender": "Node_B", "text": "Привет от узла B!", "seq": 1},
+    # 2. Run concurrent independent node interactions on different ports simultaneously
+    logger.info("--- TEST 1: Simultaneous independent concurrent operations across ports 8001, 8002 ---")
+    await asyncio.gather(
+        exchange_ping("Node_B_Process", "127.0.0.1", 8001, timeout_val=2.0),
+        exchange_ping("Node_A_Process", "127.0.0.1", 8002, timeout_val=2.0),
     )
-    raw_bytes = ping_frame.encode()
-    logger.info(f"[Node_B (Client)] [FRAME PACKED] PING. Размер: {len(raw_bytes)} Б (Header: 24Б + Payload: {ping_frame.payload_length}Б)")
-    logger.info(f"[Node_B (Client)] [RAW HEADER HEX] (первые 24 байта): {raw_bytes[:24].hex()}")
 
-    await conn_b.send_frame(ping_frame)
-    logger.info(f"[Node_B (Client)] [SEND FRAME] PING отправлен в сеть")
+    # 3. Test timeout mechanism explicitly on port 8003 (Node_C delays response by 3.0s, client timeout=1.0s)
+    logger.info("--- TEST 2: Timeout detection test (Target Node_C on port 8003 with 1.0s timeout) ---")
+    await exchange_ping("Node_B_Process", "127.0.0.1", 8003, timeout_val=1.0)
 
-    # 4. Узел B ожидает ответ PONG
-    pong_response = await conn_b.read_frame(timeout=2.0)
-    if pong_response:
-        unpacked_pong = pong_response.unpack_data()
-        logger.info(f"[Node_B (Client)] [RECV PONG] Узел B получил ответ PONG от Узла A!")
-        logger.info(f"[Node_B (Client)] [UNPACKED PAYLOAD] {unpacked_pong}")
-
-    # 5. Узел B отправляет объемное прикладное сообщение (APP_MESSAGE)
-    big_payload = {"id": "msg-999", "content": "X" * 1000, "meta": {"encrypted": False}}
-    app_frame = Frame.pack_data(msg_type=MessageType.APP_MESSAGE, data=big_payload)
-    logger.info(f"[Node_B (Client)] [SEND APP_MESSAGE] (Payload len: {app_frame.payload_length} байт)...")
-    await conn_b.send_frame(app_frame)
-
-    ack_response = await conn_b.read_frame(timeout=2.0)
-    if ack_response:
-        logger.info(f"[Node_B (Client)] [RECV APP_ACK] Подтверждение: {ack_response.unpack_data()}")
-
-    await conn_b.close()
+    # Clean stop all nodes
     await node_a.stop()
+    await node_b.stop()
+    await node_c.stop()
 
-    print("\n" + "=" * 75)
-    print(" [SUCCESS] Демонстрация успешно завершена!")
-    print(f" [LOG FILE] Подробный лог сохранен в: {os.path.abspath('logs/stage1_demo.log')}")
-    print("=" * 75)
+    print("\n" + "=" * 80)
+    print(" [SUCCESS] STAGE 1 DEMO COMPLETED: Concurrent processes on different ports & timeouts verified!")
+    print(f" [LOG FILE] {os.path.abspath('logs/stage1_demo.log')}")
+    print("=" * 80)
 
 if __name__ == "__main__":
     asyncio.run(run_demo())

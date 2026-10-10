@@ -45,3 +45,6 @@ class PayloadLengthExceededError(FramingError):
 class InvalidProtocolVersionError(FramingError):
     """Protocol version mismatch."""
     pass
+class ReadTimeoutError(FramingError, TimeoutError):
+    """Read timeout waiting for frame header or payload."""
+    pass

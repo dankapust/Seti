@@ -7,6 +7,14 @@ services:
     environment:
       - PYTHONPATH=/app
 
+  stage1_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage1_tests
+    environment:
+      - PYTHONPATH=/app
+
   stage1_demo:
     build:
       context: .

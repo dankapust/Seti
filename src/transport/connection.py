@@ -6,6 +6,7 @@ from src.transport.protocol import (
     MAX_FRAME_PAYLOAD,
     FramingError,
     PayloadLengthExceededError,
+    ReadTimeoutError,
 )
 from src.transport.frame import Frame
 
@@ -27,7 +28,7 @@ class Connection:
         except asyncio.IncompleteReadError:
             return None  # Connection closed cleanly by remote
         except asyncio.TimeoutError:
-            raise FramingError("Read timeout waiting for frame header")
+            raise ReadTimeoutError("Read timeout waiting for frame header")
 
         # Decode header and check payload length BEFORE allocating payload buffer
         version, msg_type, flags, req_id, payload_len = Frame.decode_header(header_bytes)
@@ -42,7 +43,7 @@ class Connection:
             except asyncio.IncompleteReadError:
                 raise FramingError(f"Incomplete payload read: expected {payload_len} bytes")
             except asyncio.TimeoutError:
-                raise FramingError("Read timeout waiting for frame payload")
+                raise ReadTimeoutError("Read timeout waiting for frame payload")
 
         return Frame(
             msg_type=msg_type,

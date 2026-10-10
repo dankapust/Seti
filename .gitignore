@@ -1,17 +1,31 @@
-# Кэш тестов pytest
-.pytest_cache/
-
-# Логи работы сети
-logs/
-
-# Состояние узлов (включая приватные ключи identity.key!)
-state/
-
-# Системные кэши Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
-# Виртуальное окружение (если используешь)
+# Pytest & testing cache
+.pytest_cache/
+**/.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & temporary runtime files
+logs/
+*.log
+
+# Node state and identity keys
+state/
+
+# Virtual environments
 venv/
 .venv/
+env/
+.env/
+
+# IDE & Editor caches
+.idea/
+.vscode/
+*.swp
+*.swo
