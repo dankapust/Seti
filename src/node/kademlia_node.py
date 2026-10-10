@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import uuid
 from typing import List, Tuple
 from src.transport.connection import Connection
 from src.transport.dispatcher import Dispatcher
@@ -75,12 +76,15 @@ class KademliaNode:
         Использует ALPHA = 3 параллельных запросов.
         Условие остановки: все K ближайших кандидатов опрошены (или исчерпан пул).
         """
+        lookup_id = uuid.uuid4().hex[:8]
+        logger.info(f"[{self.node_id_hex}] [LOOKUP_START] ID={lookup_id}, Target={target_node_id.hex()[:8]}")
         start_time = time.time()
         queried = set()
         
         # Берем начальных кандидатов из своей таблицы
         candidates = self.routing_table.get_closest_contacts(target_node_id, self.k_size * 2)
         if not candidates:
+            logger.info(f"[{self.node_id_hex}] [LOOKUP_EMPTY] ID={lookup_id}, локальная таблица пуста")
             return []
 
         seen_ids = {c.node_id for c in candidates}
@@ -131,7 +135,11 @@ class KademliaNode:
         closest = candidates[:self.k_size]
         
         elapsed = time.time() - start_time
-        logger.info(f"[{self.node_id_hex}] Lookup завершен: {rpc_count} RPC, {iterations} итераций, {elapsed:.2f} сек.")
+        logger.info(
+            f"[{self.node_id_hex}] [LOOKUP_DONE] ID={lookup_id}, "
+            f"Target={target_node_id.hex()[:8]}, RPC={rpc_count}, "
+            f"Iterations={iterations}, Elapsed={elapsed:.3f}s, Closest={len(closest)}"
+        )
         return closest
 
     async def bootstrap(self, bootstrap_host: str, bootstrap_port: int):

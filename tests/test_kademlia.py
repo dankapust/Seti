@@ -41,6 +41,37 @@ def test_identity_generation_and_determinism():
         assert ident1.node_id == ident2.node_id
         assert ident1.public_key_bytes == ident2.public_key_bytes
 
+def test_identity_spoofing_rejected():
+    """
+    Проверка критерия E2-1 и Раздела 16 ТЗ:
+    Подмена открытого ключа или NodeID должна приводить к отказу.
+    """
+    valid_contact = make_test_contact(8001)
+    assert valid_contact.validate_identity() is True
+
+    # 1. Попытка подмены NodeID (чужой NodeID при своем открытом ключе)
+    spoofed_id_contact = Contact(
+        node_id=os.urandom(32), # Поддельный ID
+        identity_algorithm="Ed25519",
+        identity_public_key=valid_contact.identity_public_key,
+        host="127.0.0.1",
+        port=8001
+    )
+    assert spoofed_id_contact.validate_identity() is False
+
+    # 2. Проверка отклонения в KademliaRPC: контакт не должен попасть в таблицу
+    table = RoutingTable(os.urandom(32), k_size=4)
+    dispatcher = Dispatcher()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        local_ident = NodeIdentity.load_or_generate(tmp_dir)
+        rpc = KademliaRPC(dispatcher, local_ident, table, "127.0.0.1", 9000)
+        
+        # Передаем поддельный контакт
+        rpc.process_incoming_contact(spoofed_id_contact.to_dict())
+        
+        # Таблица маршрутизации должна остаться абсолютно пустой
+        assert len(table.get_closest_contacts(os.urandom(32), 10)) == 0
+
 def test_xor_distance_properties():
     """Проверка математических свойств XOR-метрики."""
     id_a = os.urandom(32)

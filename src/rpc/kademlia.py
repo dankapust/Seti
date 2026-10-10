@@ -39,10 +39,9 @@ class KademliaRPC:
         try:
             contact = Contact.from_dict(contact_dict)
             
-            # ТЗ Раздел 15.3: проверка криптографической идентичности
-            expected_id = hashlib.sha256(contact.identity_public_key).digest()
-            if expected_id != contact.node_id:
-                logger.warning(f"Контакт {contact.host}:{contact.port} не прошел проверку NodeID!")
+            # ТЗ Раздел 9: проверка криптографической идентичности
+            if not contact.validate_identity():
+                logger.warning(f"Контакт {contact.host}:{contact.port} не прошел проверку NodeID (подмена ключа или ID)!")
                 return
             
             # Пытаемся добавить в K-Bucket
@@ -172,9 +171,11 @@ class KademliaRPC:
             for c_dict in data.get('contacts', []):
                 try:
                     c = Contact.from_dict(c_dict)
-                    # Базовая валидация полученных соседей
-                    if hashlib.sha256(c.identity_public_key).digest() == c.node_id:
+                    # Проверка криптографической идентичности по ТЗ
+                    if c.validate_identity():
                         contacts.append(c)
+                    else:
+                        logger.warning(f"Отклонен контакт {c.host}:{c.port} с поддельным NodeID!")
                 except Exception:
                     pass
             return contacts

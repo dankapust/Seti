@@ -42,6 +42,18 @@ class Contact:
         self.touch()
         self.last_verified_ms = self.last_seen_ms
 
+    def validate_identity(self) -> bool:
+        """
+        Проверяет криптографическое соответствие: NodeID == SHA256(identity_public_key).
+        ТЗ Раздел 9: При получении открытого ключа узел обязан повторно вычислить NodeID
+        и сравнить его с заявленным значением.
+        """
+        if not self.identity_public_key or len(self.identity_public_key) != 32:
+            return False
+        import hashlib
+        expected_id = hashlib.sha256(self.identity_public_key).digest()
+        return expected_id == self.node_id
+
     def to_dict(self) -> Dict[str, Any]:
         """Сериализация для передачи по сети (без локальных last_seen)."""
         return {
