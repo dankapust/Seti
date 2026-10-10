@@ -71,33 +71,44 @@ class KademliaNode:
 
     async def lookup_node(self, target_node_id: bytes) -> List[Contact]:
         """
-        Итеративный поиск узла (ТЗ Раздел 21).
+        Итеративный поиск узла (Kademlia DHT Lookup, ТЗ Раздел 21).
         Использует ALPHA = 3 параллельных запросов.
+        Условие остановки: все K ближайших кандидатов опрошены (или исчерпан пул).
         """
         start_time = time.time()
         queried = set()
         
         # Берем начальных кандидатов из своей таблицы
-        candidates = self.routing_table.get_closest_contacts(target_node_id, self.k_size)
+        candidates = self.routing_table.get_closest_contacts(target_node_id, self.k_size * 2)
         if not candidates:
             return []
 
+        seen_ids = {c.node_id for c in candidates}
         iterations = 0
         rpc_count = 0
 
         while True:
             iterations += 1
-            # Сортируем кандидатов по близости
+            # Сортируем всех известных кандидатов по XOR-расстоянию до цели
             candidates.sort(key=lambda c: xor_distance(c.node_id, target_node_id))
             
-            # Выбираем до ALPHA неопрошенных кандидатов
-            unqueried = [c for c in candidates if c.node_id not in queried][:self.alpha]
+            # Проверяем K ближайших узлов
+            k_closest = candidates[:self.k_size]
+            unqueried_in_k = [c for c in k_closest if c.node_id not in queried]
             
-            if not unqueried:
-                break # Исчерпан пул кандидатов
+            # Если все K ближайших кандидатов уже опрошены, поиск завершен
+            if not unqueried_in_k:
+                break
+                
+            # Выбираем до ALPHA ближайших неопрошенных кандидатов
+            unqueried_all = [c for c in candidates if c.node_id not in queried]
+            to_query = unqueried_all[:self.alpha]
+            
+            if not to_query:
+                break
                 
             tasks = []
-            for c in unqueried:
+            for c in to_query:
                 queried.add(c.node_id)
                 tasks.append(self._query_contact(c, target_node_id))
                 rpc_count += 1
@@ -105,16 +116,15 @@ class KademliaNode:
             # Опрашиваем параллельно (ALPHA запросов)
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            new_nodes_found = False
             for res in results:
                 if isinstance(res, list):
                     for new_contact in res:
-                        if new_contact.node_id != self.identity.node_id and new_contact not in candidates:
+                        if new_contact.node_id != self.identity.node_id and new_contact.node_id not in seen_ids:
+                            seen_ids.add(new_contact.node_id)
                             candidates.append(new_contact)
-                            new_nodes_found = True
             
-            # ТЗ: Поиск завершается, если новые узлы не улучшают ближайшую k-выборку
-            if not new_nodes_found:
+            # Если опрошены вообще все известные кандидаты
+            if all(c.node_id in queried for c in candidates):
                 break
 
         candidates.sort(key=lambda c: xor_distance(c.node_id, target_node_id))

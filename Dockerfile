@@ -15,4 +15,4 @@ COPY demo_stage2.py ./
 
 ENV PYTHONPATH=/app
 
-CMD ["python", "-m", "pytest", "tests/test_framing.py", "-v"]
+CMD ["python", "-m", "pytest", "tests/", "-v"]

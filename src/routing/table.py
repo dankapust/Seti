@@ -41,6 +41,15 @@ class KBucket:
         # 3. Контакт новый, но корзина полна
         return False, self.contacts[0]
 
+    def promote_contact(self, node_id: bytes):
+        """Перемещает контакт в конец корзины как недавно подтвержденный."""
+        for idx, c in enumerate(self.contacts):
+            if c.node_id == node_id:
+                c.mark_verified()
+                self.contacts.pop(idx)
+                self.contacts.append(c)
+                break
+
 class RoutingTable:
     def __init__(self, local_node_id: bytes, k_size: int):
         self.local_node_id = local_node_id
@@ -71,6 +80,12 @@ class RoutingTable:
         distance = xor_distance(self.local_node_id, node_id)
         idx = self._bucket_index(distance)
         self.buckets[idx].remove_contact(node_id)
+
+    def promote_contact(self, node_id: bytes):
+        """Перемещает контакт в конец корзины как активный."""
+        distance = xor_distance(self.local_node_id, node_id)
+        idx = self._bucket_index(distance)
+        self.buckets[idx].promote_contact(node_id)
 
     def get_closest_contacts(self, target_node_id: bytes, limit: int) -> List[Contact]:
         """

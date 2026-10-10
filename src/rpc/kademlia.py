@@ -1,7 +1,8 @@
 import time
 import logging
 import hashlib
-from typing import List, Optional
+import asyncio
+from typing import List, Optional, Set
 from src.transport import Frame, MessageType, Connection, Dispatcher
 from src.routing.contact import Contact
 from src.routing.table import RoutingTable
@@ -10,12 +11,14 @@ from src.identity.identity import NodeIdentity
 logger = logging.getLogger(__name__)
 
 class KademliaRPC:
-    def __init__(self, dispatcher: Dispatcher, identity: NodeIdentity, routing_table: RoutingTable, host: str, port: int):
+    def __init__(self, dispatcher: Dispatcher, identity: NodeIdentity, routing_table: RoutingTable, host: str, port: int, ping_timeout: float = 2.0):
         self.dispatcher = dispatcher
         self.identity = identity
         self.routing_table = routing_table
         self.host = host
         self.port = port
+        self.ping_timeout = ping_timeout
+        self._pinging_nodes: Set[bytes] = set()
         
         # Регистрируем обработчики для входящих запросов
         self.dispatcher.register(MessageType.PING, self.handle_ping)
@@ -44,11 +47,50 @@ class KademliaRPC:
             
             # Пытаемся добавить в K-Bucket
             added, oldest = self.routing_table.add_contact(contact)
-            # Примечание: по ТЗ, если added=False (корзина полна), нужно пинговать oldest.
-            # Эта логика обычно выносится в фоновый процесс (worker), чтобы не блокировать текущий запрос.
+            if not added and oldest is not None:
+                # Корзина полна: по спецификации Kademlia проверяем доступность oldest
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.ping_and_evict(oldest, contact))
+                except RuntimeError:
+                    pass
             
         except Exception as e:
             logger.warning(f"Ошибка разбора контакта: {e}")
+
+    async def ping_and_evict(self, oldest: Contact, candidate: Contact):
+        """
+        Проверяет доступность самого старого контакта (oldest) при переполнении K-Bucket.
+        Если oldest ответил -> сохраняем его и перемещаем в хвост (promote_contact).
+        Если oldest не ответил -> вытесняем его (remove_contact) и добавляем candidate.
+        """
+        if oldest.node_id in self._pinging_nodes:
+            return
+        self._pinging_nodes.add(oldest.node_id)
+        
+        logger.info(f"[{self.identity.node_id.hex()[:8]}] K-Bucket полон! Проверка доступности oldest ({oldest.host}:{oldest.port})...")
+        is_alive = False
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(oldest.host, oldest.port),
+                timeout=self.ping_timeout
+            )
+            conn = Connection(reader, writer)
+            is_alive = await self.send_ping(conn)
+            await conn.close()
+        except Exception as e:
+            logger.debug(f"[{self.identity.node_id.hex()[:8]}] Oldest {oldest.host}:{oldest.port} недоступен: {e}")
+            is_alive = False
+        finally:
+            self._pinging_nodes.discard(oldest.node_id)
+
+        if is_alive:
+            logger.info(f"[{self.identity.node_id.hex()[:8]}] Oldest {oldest.host}:{oldest.port} ответил на PING. Сохраняем в K-Bucket.")
+            self.routing_table.promote_contact(oldest.node_id)
+        else:
+            logger.info(f"[{self.identity.node_id.hex()[:8]}] Oldest {oldest.host}:{oldest.port} не ответил (таймаут). Вытесняем и добавляем {candidate.host}:{candidate.port}.")
+            self.routing_table.remove_contact(oldest.node_id)
+            self.routing_table.add_contact(candidate)
 
     # ==========================================
     # ОБРАБОТЧИКИ ВХОДЯЩИХ ЗАПРОСОВ (СЕРВЕР)
