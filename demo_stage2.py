@@ -64,9 +64,9 @@ async def run_stage2():
         print("[FAIL] Ошибка вытеснения oldest.")
 
     # -------------------------------------------------------------
-    # 2. РАЗВЕРТЫВАНИЕ СЕТИ ИЗ 5 УЗЛОВ И STAR BOOTSTRAP
+    # 2. РАЗВЕРТЫВАНИЕ СЕТИ ИЗ 5 УЗЛОВ И STAR BOOTSTRAP (СХЕМА №1)
     # -------------------------------------------------------------
-    print("\n--- ТЕСТ 2: STAR BOOTSTRAP СЕТИ ИЗ 5 УЗЛОВ ---")
+    print("\n--- ТЕСТ 2: STAR BOOTSTRAP СЕТИ ИЗ 5 УЗЛОВ (СХЕМА №1) ---")
     seed = KademliaNode("./state/node_seed", "127.0.0.1", 9000, k_size=4, alpha=3)
     await seed.start()
     
@@ -78,6 +78,13 @@ async def run_stage2():
         await node.bootstrap("127.0.0.1", 9000)
         nodes.append(node)
         await asyncio.sleep(0.2)
+
+    # Вывод распределения по корзинам (ТЗ Раздел 10.1 / E2-3)
+    print("\n[ИНФОРМАЦИЯ О ТАБЛИЦЕ МАРШРУТИЗАЦИИ SEED УЗЛА]")
+    seed_dist = seed.routing_table.get_bucket_distribution()
+    print(f"Всего известных контактов у Seed: {seed.routing_table.total_contacts_count()}")
+    for idx, b in seed_dist.items():
+        print(f"  Корзина index={idx}: {b['count']}/{b['capacity']} контактов")
 
     # -------------------------------------------------------------
     # 3. ИТЕРАТИВНЫЙ KADEMLIA LOOKUP С ОПРОСОМ ВСЕХ КАНДИДАТОВ (E2-4)
@@ -95,9 +102,44 @@ async def run_stage2():
     else:
         print(f"[FAIL] Целевой узел не найден в результатах Lookup.")
 
-    # 4. Завершение работы
+    # Останавливаем узлы сети Star перед вторым тестом
     await seed.stop()
     for n in nodes:
+        await n.stop()
+
+    # -------------------------------------------------------------
+    # 4. СХЕМА BOOTSTRAP №2: CHAIN / ДРЕВОВИДНЫЙ BOOTSTRAP (E2-8 / ТЗ Раздел 5)
+    # -------------------------------------------------------------
+    print("\n--- ТЕСТ 4: СХЕМА BOOTSTRAP №2 — CHAIN (КАСКАДНОЕ ПОДКЛЮЧЕНИЕ) ---")
+    chain_seed = KademliaNode("./state/chain_node_0", "127.0.0.1", 9100, k_size=4, alpha=3)
+    await chain_seed.start()
+
+    chain_nodes = [chain_seed]
+    # Каждый следующий узел подключается ТОЛЬКО к предыдущему: N(i) -> N(i-1)
+    for i in range(1, 4):
+        prev_port = 9100 + (i - 1)
+        curr_port = 9100 + i
+        c_node = KademliaNode(f"./state/chain_node_{i}", "127.0.0.1", curr_port, k_size=4, alpha=3)
+        await c_node.start()
+        logger.info(f"Узел цепочки {c_node.node_id_hex} (порт {curr_port}) подключается к узлу на порту {prev_port}...")
+        await c_node.bootstrap("127.0.0.1", prev_port)
+        chain_nodes.append(c_node)
+        await asyncio.sleep(0.2)
+
+    # Проверяем сквозное обнаружение через цепочку: крайний узел 3 ищет узел 0 (корневой seed)
+    last_node = chain_nodes[3]
+    first_node = chain_nodes[0]
+    logger.info(f"Крайний узел цепочки {last_node.node_id_hex} (порт 9103) выполняет Lookup корневого узла {first_node.node_id_hex} (порт 9100)...")
+    chain_lookup = await last_node.lookup_node(first_node.identity.node_id)
+
+    chain_found = any(c.node_id == first_node.identity.node_id for c in chain_lookup)
+    if chain_found:
+        print(f"[SUCCESS] Chain Bootstrap успешен: сеть сошлась через многохоповый маршрут!")
+    else:
+        print(f"[FAIL] Не удалось обнаружить корневой узел через цепочку.")
+
+    # Завершение работы цепочки
+    for n in chain_nodes:
         await n.stop()
 
     print("\n" + "=" * 80)

@@ -99,3 +99,30 @@ class RoutingTable:
         all_contacts.sort(key=lambda c: xor_distance(c.node_id, target_node_id))
         
         return all_contacts[:limit]
+
+    def get_bucket_distribution(self) -> dict:
+        """
+        Возвращает детальную статистику распределения контактов по отдельным k-bucket.
+        Требование ТЗ Раздел 10.1: показывать содержимое отдельных корзин.
+        """
+        distribution = {}
+        for idx, bucket in enumerate(self.buckets):
+            if bucket.contacts:
+                distribution[idx] = {
+                    "count": len(bucket.contacts),
+                    "capacity": bucket.k_size,
+                    "contacts": [
+                        {
+                            "node_id": c.node_id.hex()[:8],
+                            "host": c.host,
+                            "port": c.port,
+                            "distance_hex": hex(xor_distance(self.local_node_id, c.node_id))[:10]
+                        }
+                        for c in bucket.contacts
+                    ]
+                }
+        return distribution
+
+    def total_contacts_count(self) -> int:
+        """Общее число уникальных контактов во всей таблице маршрутизации."""
+        return sum(len(b.contacts) for b in self.buckets)

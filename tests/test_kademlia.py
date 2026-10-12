@@ -73,19 +73,64 @@ def test_identity_spoofing_rejected():
         assert len(table.get_closest_contacts(os.urandom(32), 10)) == 0
 
 def test_xor_distance_properties():
-    """Проверка математических свойств XOR-метрики."""
-    id_a = os.urandom(32)
-    id_b = os.urandom(32)
-    id_c = os.urandom(32)
+    """Проверка математических свойств XOR-метрики (E2-2 и ТЗ Раздел 4)."""
+    # 1. Свойства для случайных идентификаторов
+    for _ in range(10):
+        id_a = os.urandom(32)
+        id_b = os.urandom(32)
+        id_c = os.urandom(32)
 
-    # 1. d(x, x) = 0
-    assert xor_distance(id_a, id_a) == 0
+        # 1. d(x, x) = 0 (тождество неразличимых)
+        assert xor_distance(id_a, id_a) == 0
+        assert (xor_distance(id_a, id_b) == 0) == (id_a == id_b)
 
-    # 2. Симметричность: d(x, y) == d(y, x)
-    assert xor_distance(id_a, id_b) == xor_distance(id_b, id_a)
+        # 2. Неотрицательность
+        assert xor_distance(id_a, id_b) >= 0
 
-    # 3. Неотрицательность
-    assert xor_distance(id_a, id_b) >= 0
+        # 3. Симметричность: d(x, y) == d(y, x)
+        assert xor_distance(id_a, id_b) == xor_distance(id_b, id_a)
+
+        # 4. Неравенство треугольника в форме XOR: d(x, z) = d(x, y) ^ d(y, z)
+        # и как следствие для вещественных/целых расстояний: d(x, z) <= d(x, y) + d(y, z)
+        dist_ac = xor_distance(id_a, id_c)
+        dist_ab = xor_distance(id_a, id_b)
+        dist_bc = xor_distance(id_b, id_c)
+        assert dist_ac == (dist_ab ^ dist_bc)
+        assert dist_ac <= dist_ab + dist_bc
+
+        # 5. Ультраметрическое свойство (сильное неравенство треугольника):
+        # Старший различающийся бит (префикс): d(x, z) <= max(d(x, y), d(y, z))
+        # когда длины общих префиксов удовлетворяют ультраметрике
+        assert dist_ac <= (dist_ab | dist_bc)
+
+def test_routing_table_bucket_distribution():
+    """Проверка распределения контактов по корзинам (E2-3 и ТЗ Раздел 10.1)."""
+    my_id = b"\x00" * 32
+    table = RoutingTable(my_id, k_size=4)
+
+    # Пустая таблица
+    dist = table.get_bucket_distribution()
+    assert len(dist) == 0
+    assert table.total_contacts_count() == 0
+
+    # Создаем контакты, различающиеся на разном битовом расстоянии
+    c1 = make_test_contact(8001, node_id=b"\x80" + b"\x00" * 31) # dist = 255
+    c2 = make_test_contact(8002, node_id=b"\x40" + b"\x00" * 31) # dist = 254
+    c3 = make_test_contact(8003, node_id=b"\x20" + b"\x00" * 31) # dist = 253
+
+    table.add_contact(c1)
+    table.add_contact(c2)
+    table.add_contact(c3)
+
+    assert table.total_contacts_count() == 3
+    dist = table.get_bucket_distribution()
+    assert len(dist) == 3
+    # Проверяем наличие информации о заполнении
+    for idx, bucket_info in dist.items():
+        assert bucket_info["count"] == 1
+        assert bucket_info["capacity"] == 4
+        assert len(bucket_info["contacts"]) == 1
+
 
 def test_kbucket_lru_and_overflow():
     """Проверка емкости KBucket и возврата oldest при переполнении."""
@@ -254,3 +299,58 @@ async def test_multi_node_bootstrap_and_lookup():
             await n.stop()
         for d in temp_dirs:
             shutil.rmtree(d, ignore_errors=True)
+
+@pytest.mark.asyncio
+async def test_chain_bootstrap_and_lookup():
+    """
+    Интеграционный тест: цепочечный (Chain/Tree) bootstrap (ТЗ Раздел 5, E2-8).
+    Узел 0 <- Узел 1 <- Узел 2 <- Узел 3.
+    Проверяется сходимость сети и обнаружение узлов через промежуточные хопы.
+    """
+    temp_dirs = [tempfile.mkdtemp() for _ in range(4)]
+    nodes = []
+    base_port = 9800
+
+    try:
+        # Узел 0 (Seed)
+        n0 = KademliaNode(temp_dirs[0], "127.0.0.1", base_port, k_size=4, alpha=3)
+        await n0.start()
+        nodes.append(n0)
+
+        # Узел 1 подключается к Узлу 0
+        n1 = KademliaNode(temp_dirs[1], "127.0.0.1", base_port + 1, k_size=4, alpha=3)
+        await n1.start()
+        await n1.bootstrap("127.0.0.1", base_port)
+        nodes.append(n1)
+        await asyncio.sleep(0.1)
+
+        # Узел 2 подключается к Узлу 1
+        n2 = KademliaNode(temp_dirs[2], "127.0.0.1", base_port + 2, k_size=4, alpha=3)
+        await n2.start()
+        await n2.bootstrap("127.0.0.1", base_port + 1)
+        nodes.append(n2)
+        await asyncio.sleep(0.1)
+
+        # Узел 3 подключается к Узлу 2
+        n3 = KademliaNode(temp_dirs[3], "127.0.0.1", base_port + 3, k_size=4, alpha=3)
+        await n3.start()
+        await n3.bootstrap("127.0.0.1", base_port + 2)
+        nodes.append(n3)
+        await asyncio.sleep(0.1)
+
+        # Узел 3 ищет узел 0 через DHT Lookup (хотя соединялся только с узлом 2)
+        closest = await n3.lookup_node(n0.identity.node_id)
+        found_ids = {c.node_id for c in closest}
+        assert n0.identity.node_id in found_ids
+
+        # Узел 0 ищет узел 3 через DHT Lookup
+        closest_from_seed = await n0.lookup_node(n3.identity.node_id)
+        found_from_seed = {c.node_id for c in closest_from_seed}
+        assert n3.identity.node_id in found_from_seed
+
+    finally:
+        for n in nodes:
+            await n.stop()
+        for d in temp_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+
