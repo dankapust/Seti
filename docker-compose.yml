@@ -32,3 +32,12 @@ services:
     command: ["python", "demo_stage2.py"]
     environment:
       - PYTHONPATH=/app
+
+  stage3_demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage3_demo
+    command: ["python", "demo_stage3.py"]
+    environment:
+      - PYTHONPATH=/app

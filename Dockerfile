@@ -12,6 +12,7 @@ COPY config/ ./config/
 COPY tests/ ./tests/
 COPY demo_stage1.py ./
 COPY demo_stage2.py ./
+COPY demo_stage3.py ./
 
 ENV PYTHONPATH=/app
 

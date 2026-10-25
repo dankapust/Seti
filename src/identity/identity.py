@@ -22,6 +22,20 @@ class NodeIdentity:
         private_key = ed25519.Ed25519PrivateKey.generate()
         return cls(private_key)
 
+    def sign(self, data: bytes) -> bytes:
+        """Создает цифровую подпись Ed25519 для переданных байтов."""
+        return self.private_key.sign(data)
+
+    @staticmethod
+    def verify_signature(public_key_bytes: bytes, signature: bytes, data: bytes) -> bool:
+        """Проверяет цифровую подпись Ed25519 с помощью сырых байтов публичного ключа."""
+        try:
+            public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
+            public_key.verify(signature, data)
+            return True
+        except Exception:
+            return False
+
     @classmethod
     def load_or_generate(cls, state_dir: str) -> 'NodeIdentity':
         """Загружает ключ из директории состояния, либо генерирует новый, если его нет."""

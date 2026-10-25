@@ -2,27 +2,40 @@ import time
 import logging
 import hashlib
 import asyncio
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 from src.transport import Frame, MessageType, Connection, Dispatcher
 from src.routing.contact import Contact
 from src.routing.table import RoutingTable
 from src.identity.identity import NodeIdentity
+from src.storage import DHTStorage, NodeRecord
 
 logger = logging.getLogger(__name__)
 
 class KademliaRPC:
-    def __init__(self, dispatcher: Dispatcher, identity: NodeIdentity, routing_table: RoutingTable, host: str, port: int, ping_timeout: float = 2.0):
+    def __init__(
+        self,
+        dispatcher: Dispatcher,
+        identity: NodeIdentity,
+        routing_table: RoutingTable,
+        host: str,
+        port: int,
+        ping_timeout: float = 2.0,
+        storage: Optional[DHTStorage] = None
+    ):
         self.dispatcher = dispatcher
         self.identity = identity
         self.routing_table = routing_table
         self.host = host
         self.port = port
         self.ping_timeout = ping_timeout
+        self.storage = storage if storage is not None else DHTStorage()
         self._pinging_nodes: Set[bytes] = set()
         
         # Регистрируем обработчики для входящих запросов
         self.dispatcher.register(MessageType.PING, self.handle_ping)
         self.dispatcher.register(MessageType.FIND_NODE_REQUEST, self.handle_find_node)
+        self.dispatcher.register(MessageType.STORE_REQUEST, self.handle_store)
+        self.dispatcher.register(MessageType.FIND_VALUE_REQUEST, self.handle_find_value)
 
     def get_local_contact(self) -> Contact:
         """Формирует свой Контакт для отправки другим узлам."""
@@ -133,6 +146,71 @@ class KademliaRPC:
         )
         await conn.send_frame(resp_frame)
 
+    async def handle_store(self, conn: Connection, frame: Frame):
+        """Обработка STORE_REQUEST: валидация и сохранение NodeRecord (ТЗ Раздел 10.3)."""
+        data = frame.unpack_data()
+        self.process_incoming_contact(data['sender'])
+
+        record_dict = data.get('record')
+        if not record_dict:
+            resp_frame = Frame.pack_data(
+                msg_type=MessageType.STORE_RESPONSE,
+                data={"responder": self.get_local_contact().to_dict(), "success": False, "reason": "Missing record"},
+                request_id=frame.request_id
+            )
+            await conn.send_frame(resp_frame)
+            return
+
+        try:
+            record = NodeRecord.from_dict(record_dict)
+            success, reason = self.storage.put(record)
+        except Exception as e:
+            success = False
+            reason = str(e)
+
+        resp_data = {
+            "responder": self.get_local_contact().to_dict(),
+            "success": success,
+            "reason": reason
+        }
+        resp_frame = Frame.pack_data(
+            msg_type=MessageType.STORE_RESPONSE,
+            data=resp_data,
+            request_id=frame.request_id
+        )
+        await conn.send_frame(resp_frame)
+
+    async def handle_find_value(self, conn: Connection, frame: Frame):
+        """Обработка FIND_VALUE_REQUEST: возврат записи либо K ближайших контактов."""
+        data = frame.unpack_data()
+        self.process_incoming_contact(data['sender'])
+
+        storage_key = data.get('storage_key')
+        record = self.storage.get(storage_key) if storage_key else None
+
+        if record is not None:
+            # Запись найдена в локальном хранилище
+            resp_data = {
+                "responder": self.get_local_contact().to_dict(),
+                "record": record.to_dict(),
+                "contacts": []
+            }
+        else:
+            # Запись отсутствует: возвращаем k ближайших контактов к storage_key
+            closest = self.routing_table.get_closest_contacts(storage_key, self.routing_table.k_size)
+            resp_data = {
+                "responder": self.get_local_contact().to_dict(),
+                "record": None,
+                "contacts": [c.to_dict() for c in closest]
+            }
+
+        resp_frame = Frame.pack_data(
+            msg_type=MessageType.FIND_VALUE_RESPONSE,
+            data=resp_data,
+            request_id=frame.request_id
+        )
+        await conn.send_frame(resp_frame)
+
     # ==========================================
     # КЛИЕНТСКИЕ МЕТОДЫ (ОТПРАВКА ЗАПРОСОВ)
     # ==========================================
@@ -180,3 +258,64 @@ class KademliaRPC:
                     pass
             return contacts
         return []
+
+    async def send_store(self, conn: Connection, record: NodeRecord, timeout: float = 5.0) -> Tuple[bool, str]:
+        """Отправляет STORE_REQUEST и возвращает (успех, причина)."""
+        req_data = {
+            "sender": self.get_local_contact().to_dict(),
+            "record": record.to_dict()
+        }
+        frame = Frame.pack_data(msg_type=MessageType.STORE_REQUEST, data=req_data)
+        await conn.send_frame(frame)
+
+        resp = await conn.read_frame(timeout=timeout)
+        if resp and resp.msg_type == MessageType.STORE_RESPONSE and resp.request_id == frame.request_id:
+            data = resp.unpack_data()
+            self.process_incoming_contact(data['responder'])
+            return bool(data.get('success', False)), data.get('reason', '')
+        return False, "Timeout or invalid response"
+
+    async def send_find_value(self, conn: Connection, storage_key: bytes, timeout: float = 5.0) -> Tuple[Optional[NodeRecord], List[Contact]]:
+        """
+        Отправляет FIND_VALUE_REQUEST.
+        Если удаленный узел хранит запись -> возвращает (record, []).
+        Если запись не найдена -> возвращает (None, closest_contacts).
+        """
+        req_data = {
+            "sender": self.get_local_contact().to_dict(),
+            "storage_key": storage_key
+        }
+        frame = Frame.pack_data(msg_type=MessageType.FIND_VALUE_REQUEST, data=req_data)
+        await conn.send_frame(frame)
+
+        resp = await conn.read_frame(timeout=timeout)
+        if resp and resp.msg_type == MessageType.FIND_VALUE_RESPONSE and resp.request_id == frame.request_id:
+            data = resp.unpack_data()
+            self.process_incoming_contact(data['responder'])
+
+            # 1. Проверяем, вернул ли узел запись
+            record_dict = data.get('record')
+            if record_dict:
+                try:
+                    record = NodeRecord.from_dict(record_dict)
+                    # Валидируем запись
+                    is_valid, reason = record.verify()
+                    if is_valid:
+                        return record, []
+                    else:
+                        logger.warning(f"Получена невалидная DHT-запись: {reason}")
+                except Exception as e:
+                    logger.warning(f"Ошибка парсинга DHT-записи: {e}")
+
+            # 2. Если записи нет, извлекаем возвращенные контакты
+            contacts = []
+            for c_dict in data.get('contacts', []):
+                try:
+                    c = Contact.from_dict(c_dict)
+                    if c.validate_identity():
+                        contacts.append(c)
+                except Exception:
+                    pass
+            return None, contacts
+
+        return None, []
