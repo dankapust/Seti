@@ -78,13 +78,3 @@ services:
     command: ["python", "demos/demo_stage4.py"]
     environment:
       - PYTHONPATH=/app
-
-
-  stage4_demo:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: seti_stage4_demo
-    command: ["python", "demos/demo_stage4.py"]
-    environment:
-      - PYTHONPATH=/app
