@@ -25,6 +25,8 @@ class MessageType(enum.IntEnum):
     TUNNEL_CLOSE = 14
     APP_MESSAGE = 15
     APP_ACK = 16
+    HANDSHAKE_INIT = 17
+    HANDSHAKE_RESP = 18
     ERROR = 127
 
 class FrameFlags(enum.IntFlag):

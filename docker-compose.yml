@@ -12,6 +12,34 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: seti_stage1_tests
+    command: ["python", "-m", "pytest", "tests/test_framing.py", "-v"]
+    environment:
+      - PYTHONPATH=/app
+
+  stage2_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage2_tests
+    command: ["python", "-m", "pytest", "tests/test_kademlia.py", "-v"]
+    environment:
+      - PYTHONPATH=/app
+
+  stage3_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage3_tests
+    command: ["python", "-m", "pytest", "tests/test_storage_and_replication.py", "-v"]
+    environment:
+      - PYTHONPATH=/app
+
+  stage4_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage4_tests
+    command: ["python", "-m", "pytest", "tests/test_secure_channel.py", "-v"]
     environment:
       - PYTHONPATH=/app
 
@@ -20,7 +48,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: seti_stage1_demo
-    command: ["python", "demo_stage1.py"]
+    command: ["python", "demos/demo_stage1.py"]
     environment:
       - PYTHONPATH=/app
 
@@ -29,7 +57,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: seti_stage2_demo
-    command: ["python", "demo_stage2.py"]
+    command: ["python", "demos/demo_stage2.py"]
     environment:
       - PYTHONPATH=/app
 
@@ -38,6 +66,25 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: seti_stage3_demo
-    command: ["python", "demo_stage3.py"]
+    command: ["python", "demos/demo_stage3.py"]
+    environment:
+      - PYTHONPATH=/app
+
+  stage4_demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage4_demo
+    command: ["python", "demos/demo_stage4.py"]
+    environment:
+      - PYTHONPATH=/app
+
+
+  stage4_demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage4_demo
+    command: ["python", "demos/demo_stage4.py"]
     environment:
       - PYTHONPATH=/app

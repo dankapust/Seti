@@ -10,9 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY config/ ./config/
 COPY tests/ ./tests/
-COPY demo_stage1.py ./
-COPY demo_stage2.py ./
-COPY demo_stage3.py ./
+COPY demos/ ./demos/
 
 ENV PYTHONPATH=/app
 
