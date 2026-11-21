@@ -29,5 +29,8 @@ env/
 .vscode/
 *.swp
 *.swo
-# Student personal defense cheatsheet
+# Student personal defense cheatsheet and private notes
 DEFENSE_CHEATSHEET.md
+STUDENT_DEFENSE_SUMMARY.md
+STUDENT_*.md
+*.secret.md
