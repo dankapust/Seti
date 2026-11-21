@@ -78,3 +78,22 @@ services:
     command: ["python", "demos/demo_stage4.py"]
     environment:
       - PYTHONPATH=/app
+
+  stage5_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage5_tests
+    command: ["python", "-m", "pytest", "tests/test_tunnel.py", "-v"]
+    environment:
+      - PYTHONPATH=/app
+
+  stage5_demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_stage5_demo
+    command: ["python", "demos/demo_stage5.py"]
+    environment:
+      - PYTHONPATH=/app
+

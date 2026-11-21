@@ -43,6 +43,12 @@ class KademliaNode:
         self.rpc = KademliaRPC(
             self.dispatcher, self.identity, self.routing_table, host, port, storage=self.storage
         )
+
+        # 4. Инициализируем менеджер оверлейных туннелей (Этап 5 / ТЗ Раздел 12)
+        from src.tunnel.tunnel import TunnelManager
+        self.tunnel_manager = TunnelManager(
+            self.dispatcher, self.identity, self.routing_table, host, port
+        )
         
         self.server = None
         self._current_sequence_number = 1
