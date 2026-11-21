@@ -1,3 +1,4 @@
+import hashlib
 import asyncio
 import os
 import shutil
@@ -225,3 +226,120 @@ async def test_find_value_after_replica_failure():
                 pass
         for d in temp_dirs:
             shutil.rmtree(d, ignore_errors=True)
+
+
+# =============================================================================
+# РАСШИРЕННЫЙ НАБОР ТЕСТОВ ЭТАПА 3 (NodeRecord, ДЕТЕРМИНИЗМ И ХРАНИЛИЩЕ)
+# =============================================================================
+
+def test_record_canonical_bytes_deterministic_sorting():
+    """Тест детерминированности канонического представления: порядок адресов не влияет на подпись."""
+    ident = NodeIdentity.generate()
+    rec1 = NodeRecord.create(ident, ["192.168.1.1:8001", "10.0.0.1:8002"], sequence_number=1, ttl_seconds=100)
+    rec2 = NodeRecord.create(ident, ["10.0.0.1:8002", "192.168.1.1:8001"], sequence_number=1, ttl_seconds=100)
+    
+    # Канонические байты сортируют адреса, поэтому они должны быть строго идентичны
+    assert rec1.canonical_bytes() == rec2.canonical_bytes()
+
+def test_record_future_issued_at_rejected():
+    """Тест отклонения записи, созданной в будущем (> 10 секунд рассинхронизации часов)."""
+    ident = NodeIdentity.generate()
+    now = int(time.time())
+    rec = NodeRecord(
+        node_id=ident.node_id,
+        identity_public_key=ident.public_key_bytes,
+        addresses=["127.0.0.1:8001"],
+        sequence_number=1,
+        issued_at=now + 100, # 100 секунд в будущем
+        expires_at=now + 500,
+    )
+    rec.sign(ident)
+
+    valid, reason = rec.verify(current_time=now)
+    assert valid is False
+    assert "future" in reason.lower()
+
+def test_record_missing_signature_rejected():
+    """Тест отклонения записи с пустой подписью."""
+    ident = NodeIdentity.generate()
+    rec = NodeRecord(
+        node_id=ident.node_id,
+        identity_public_key=ident.public_key_bytes,
+        addresses=["127.0.0.1:8001"],
+        sequence_number=1,
+        issued_at=int(time.time()),
+        expires_at=int(time.time()) + 180,
+        signature=b"" # Пустая подпись
+    )
+    valid, reason = rec.verify()
+    assert valid is False
+    assert "missing signature" in reason.lower()
+
+def test_record_storage_key_computation():
+    """Тест ключа хранения DHT: строго SHA-256('node:' || NodeID)."""
+    test_node_id = os.urandom(32)
+    expected = hashlib.sha256(b"node:" + test_node_id).digest()
+    assert NodeRecord.compute_storage_key(test_node_id) == expected
+
+def test_dht_storage_overwrite_same_key_higher_seq():
+    """Тест обновления записи при строго большем sequence_number."""
+    ident = NodeIdentity.generate()
+    storage = DHTStorage()
+
+    rec1 = NodeRecord.create(ident, ["127.0.0.1:8001"], sequence_number=1)
+    rec2 = NodeRecord.create(ident, ["127.0.0.1:8002"], sequence_number=5)
+
+    ok1, _ = storage.put(rec1)
+    assert ok1 is True
+
+    ok2, _ = storage.put(rec2)
+    assert ok2 is True
+
+    current = storage.get(rec1.get_storage_key())
+    assert current.sequence_number == 5
+    assert current.addresses == ["127.0.0.1:8002"]
+
+def test_dht_storage_reject_equal_seq():
+    """Тест отклонения записи с одинаковым sequence_number (anti-replay)."""
+    ident = NodeIdentity.generate()
+    storage = DHTStorage()
+
+    rec1 = NodeRecord.create(ident, ["127.0.0.1:8001"], sequence_number=3)
+    rec_duplicate = NodeRecord.create(ident, ["127.0.0.1:9999"], sequence_number=3)
+
+    storage.put(rec1)
+    ok, reason = storage.put(rec_duplicate)
+    assert ok is False
+    assert "rollback" in reason.lower()
+
+    # В хранилище осталась первоначальная запись
+    stored = storage.get(rec1.get_storage_key())
+    assert stored.addresses == ["127.0.0.1:8001"]
+
+def test_dht_storage_exact_ttl_boundaries():
+    """Тест точной границы истечения срока действия TTL."""
+    ident = NodeIdentity.generate()
+    storage = DHTStorage()
+
+    now = 1000
+    rec = NodeRecord(
+        node_id=ident.node_id,
+        identity_public_key=ident.public_key_bytes,
+        addresses=["127.0.0.1:8001"],
+        sequence_number=1,
+        issued_at=now,
+        expires_at=now + 50,
+    )
+    rec.sign(ident)
+    storage.put(rec, current_time=now)
+
+    # В момент expires_at - 1 запись еще доступна
+    assert storage.get(rec.get_storage_key(), current_time=now + 49) is not None
+    # В момент expires_at запись уже считается истекшей
+    assert storage.get(rec.get_storage_key(), current_time=now + 50) is None
+
+def test_dht_storage_nonexistent_key_returns_none():
+    """Тест запроса несуществующего ключа: возвращает None."""
+    storage = DHTStorage()
+    assert storage.get(os.urandom(32)) is None
+    assert storage.total_count() == 0

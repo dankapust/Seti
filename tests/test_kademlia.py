@@ -1,3 +1,4 @@
+import time
 import asyncio
 import os
 import shutil
@@ -354,3 +355,130 @@ async def test_chain_bootstrap_and_lookup():
         for d in temp_dirs:
             shutil.rmtree(d, ignore_errors=True)
 
+
+
+# =============================================================================
+# РАСШИРЕННЫЙ НАБОР ТЕСТОВ ЭТАПА 2 (XOR-МЕТРИКА, ТАБЛИЦА МАРШРУТИЗАЦИИ, КОНТАКТЫ)
+# =============================================================================
+
+def test_contact_touch_and_mark_verified():
+    """Тест обновления времени наблюдения и верификации контакта."""
+    c = make_test_contact(8001)
+    init_seen = c.last_seen_ms
+    assert c.last_verified_ms == 0
+
+    time.sleep(0.01)
+    c.touch()
+    assert c.last_seen_ms >= init_seen
+
+    time.sleep(0.01)
+    c.mark_verified()
+    assert c.last_verified_ms == c.last_seen_ms
+    assert c.last_verified_ms > 0
+
+def test_contact_equality_and_hashing():
+    """Тест равенства и хэшируемости контактов (по NodeID)."""
+    same_id = b"\xaa" * 32
+    c1 = make_test_contact(8001, node_id=same_id)
+    c2 = make_test_contact(8002, node_id=same_id) # Другой порт, тот же NodeID
+    c3 = make_test_contact(8003)
+
+    assert c1 == c2
+    assert c1 != c3
+    assert hash(c1) == hash(c2)
+    assert len({c1, c2, c3}) == 2 # Корректно работает в set
+
+def test_contact_serialization_roundtrip():
+    """Тест сериализации и десериализации Contact (to_dict / from_dict)."""
+    orig = make_test_contact(9050)
+    data = orig.to_dict()
+    assert data["host"] == "127.0.0.1"
+    assert data["port"] == 9050
+    assert data["node_id"] == orig.node_id
+    assert data["identity_algorithm"] == "Ed25519"
+
+    restored = Contact.from_dict(data)
+    assert restored == orig
+    assert restored.host == orig.host
+    assert restored.port == orig.port
+    assert restored.identity_public_key == orig.identity_public_key
+
+def test_contact_invalid_node_id_length():
+    """Тест отклонения Contact с длиной NodeID != 32 байт."""
+    with pytest.raises(ValueError, match="node_id must be 32 bytes"):
+        Contact(
+            node_id=b"short_node_id",
+            identity_algorithm="Ed25519",
+            identity_public_key=b"\x00" * 32,
+            host="127.0.0.1",
+            port=8000
+        )
+
+def test_xor_distance_invalid_length():
+    """Тест выброса исключения в xor_distance при неверной длине идентификатора."""
+    with pytest.raises(ValueError, match="NodeID must be exactly 32 bytes"):
+        xor_distance(b"short", b"\x00" * 32)
+    with pytest.raises(ValueError, match="NodeID must be exactly 32 bytes"):
+        xor_distance(b"\x00" * 32, b"too_long" * 10)
+
+def test_xor_distance_maximum_possible():
+    """Тест максимального XOR-расстояния (2^256 - 1) между инверсными идентификаторами."""
+    all_zeros = b"\x00" * 32
+    all_ones = b"\xff" * 32
+    max_dist = xor_distance(all_zeros, all_ones)
+    assert max_dist == (2**256 - 1)
+    assert max_dist == int.from_bytes(b"\xff" * 32, byteorder="big")
+
+def test_routing_table_get_closest_contacts_ordering():
+    """Тест строгого порядка сортировки ближайших контактов по неубыванию XOR-расстояния."""
+    my_id = b"\x00" * 32
+    target_id = b"\x10" + b"\x00" * 31
+    table = RoutingTable(my_id, k_size=10)
+
+    # Добавляем 5 контактов с разным расстоянием до target
+    contacts = [make_test_contact(8100 + i) for i in range(5)]
+    for c in contacts:
+        table.add_contact(c)
+
+    closest = table.get_closest_contacts(target_id, limit=5)
+    assert len(closest) == 5
+
+    # Проверяем монотонность расстояний
+    distances = [xor_distance(c.node_id, target_id) for c in closest]
+    for i in range(len(distances) - 1):
+        assert distances[i] <= distances[i + 1]
+
+def test_routing_table_self_id_ignored():
+    """Тест игнорирования собственного NodeID при добавлении в таблицу маршрутизации."""
+    my_id = b"\x42" * 32
+    table = RoutingTable(my_id, k_size=4)
+    self_contact = make_test_contact(8000, node_id=my_id)
+
+    added, oldest = table.add_contact(self_contact)
+    assert added is False
+    assert table.total_contacts_count() == 0
+
+def test_routing_table_empty_lookup():
+    """Тест поиска в пустой таблице маршрутизации: возвращается пустой список."""
+    table = RoutingTable(os.urandom(32), k_size=4)
+    res = table.get_closest_contacts(os.urandom(32), 5)
+    assert res == []
+
+def test_kbucket_remove_contact():
+    """Тест явного удаления контакта из K-Bucket."""
+    bucket = KBucket(k_size=4)
+    c1 = make_test_contact(8001)
+    c2 = make_test_contact(8002)
+
+    bucket.add_or_update(c1)
+    bucket.add_or_update(c2)
+    assert len(bucket.contacts) == 2
+
+    # Удаляем c1
+    bucket.remove_contact(c1.node_id)
+    assert len(bucket.contacts) == 1
+    assert bucket.contacts[0] == c2
+
+    # Удаляем c2
+    bucket.remove_contact(c2.node_id)
+    assert len(bucket.contacts) == 0

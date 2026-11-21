@@ -270,3 +270,161 @@ def test_bidirectional_encrypted_session():
     dec_b_2 = session_b.decrypt_frame(f_a2b_2)
     assert dec_b_2.unpack_data()["from"] == "A_part2"
 
+
+
+# =============================================================================
+# РАСШИРЕННЫЙ НАБОР ТЕСТОВ ЭТАПА 4 (КРИПТОГРАФИЧЕСКИЕ ИНВАРИАНТЫ И КРАЕВЫЕ СЛУЧАИ)
+# =============================================================================
+
+def test_session_keys_are_distinct():
+    """Тест разделения ключей: send_key != recv_key для исключения Reflection Attacks."""
+    node_a = NodeIdentity.generate()
+    node_b = NodeIdentity.generate()
+
+    init_frame, eph_priv = create_handshake_init(node_a, node_b.node_id)
+    resp_frame, session_b = process_handshake_init(init_frame, node_b)
+    session_a = process_handshake_resp(resp_frame, node_a, eph_priv, node_b.node_id)
+
+    assert session_a.send_key != session_a.recv_key
+    assert len(session_a.send_key) == 32
+    assert len(session_a.recv_key) == 32
+
+def test_session_id_uniqueness():
+    """Тест уникальности сессионных идентификаторов (Forward Secrecy при повторных рукопожатиях)."""
+    node_a = NodeIdentity.generate()
+    node_b = NodeIdentity.generate()
+
+    # Сессия 1
+    init1, eph1 = create_handshake_init(node_a, node_b.node_id)
+    resp1, _ = process_handshake_init(init1, node_b)
+    sess1 = process_handshake_resp(resp1, node_a, eph1, node_b.node_id)
+
+    # Сессия 2 между теми же узлами
+    init2, eph2 = create_handshake_init(node_a, node_b.node_id)
+    resp2, _ = process_handshake_init(init2, node_b)
+    sess2 = process_handshake_resp(resp2, node_a, eph2, node_b.node_id)
+
+    assert sess1.session_id != sess2.session_id
+    assert sess1.send_key != sess2.send_key
+
+def test_nonce_generation_sequence():
+    """Тест детерминированного и монотонного формирования 12-байтовых nonces."""
+    sess = SecureSession(
+        session_id=b"\x11" * 16,
+        is_initiator=True,
+        peer_node_id=b"\x22" * 32,
+        peer_public_key=b"\x33" * 32,
+        send_key=b"\x44" * 32,
+        recv_key=b"\x55" * 32,
+    )
+    nonces = [sess._compute_nonce(i) for i in range(1, 101)]
+    assert len(nonces) == 100
+    assert len(set(nonces)) == 100  # Все 100 nonces абсолютно уникальны
+    for n in nonces:
+        assert len(n) == 12
+        assert n[-4:] == b"\x11\x11\x11\x11"  # Хвост - соль сессии
+
+def test_decrypt_frame_without_encrypted_flag_fails():
+    """Тест отказа при попытке расшифровать кадр без флага ENCRYPTED."""
+    sess = SecureSession(
+        session_id=b"\x11" * 16,
+        is_initiator=True,
+        peer_node_id=b"\x22" * 32,
+        peer_public_key=b"\x33" * 32,
+        send_key=b"\x44" * 32,
+        recv_key=b"\x55" * 32,
+    )
+    plain_frame = Frame.pack_data(MessageType.APP_MESSAGE, {"unencrypted": True}, flags=FrameFlags.NONE)
+    with pytest.raises(DecryptionError, match="not flagged as ENCRYPTED"):
+        sess.decrypt_frame(plain_frame)
+
+def test_decrypt_truncated_payload_fails():
+    """Тест отклонения слишком короткого зашифрованного пакета (< 24 байт: 8B seq + 16B tag)."""
+    sess = SecureSession(
+        session_id=b"\x11" * 16,
+        is_initiator=True,
+        peer_node_id=b"\x22" * 32,
+        peer_public_key=b"\x33" * 32,
+        send_key=b"\x44" * 32,
+        recv_key=b"\x55" * 32,
+    )
+    with pytest.raises(DecryptionError, match="too short"):
+        sess.decrypt_payload(b"too_short_bytes")
+
+def test_replay_window_out_of_order_packets():
+    """Тест строгого отклонения пакетов с нарушением монотонности sequence."""
+    node_a = NodeIdentity.generate()
+    node_b = NodeIdentity.generate()
+
+    init_frame, eph_priv = create_handshake_init(node_a, node_b.node_id)
+    resp_frame, session_b = process_handshake_init(init_frame, node_b)
+    session_a = process_handshake_resp(resp_frame, node_a, eph_priv, node_b.node_id)
+
+    # Генерируем 5 кадров (seq 1, 2, 3, 4, 5)
+    frames = [session_a.encrypt_frame(Frame.pack_data(MessageType.APP_MESSAGE, {"i": i})) for i in range(5)]
+
+    # Принимаем seq 1
+    session_b.decrypt_frame(frames[0])
+    # Сразу принимаем seq 5 (пропуск 2, 3, 4)
+    session_b.decrypt_frame(frames[4])
+    assert session_b.last_recv_seq == 5
+
+    # Попытка доставить опоздавший seq 3 (3 <= 5) -> должна быть заблокирована!
+    with pytest.raises(ReplayAttackError, match="Replay attack detected"):
+        session_b.decrypt_frame(frames[2])
+
+def test_handshake_malformed_frame_rejected():
+    """Тест обработки рукопожатием неверного типа кадра (не HANDSHAKE_INIT)."""
+    node = NodeIdentity.generate()
+    invalid_frame = Frame.pack_data(MessageType.PING, {"test": True})
+    with pytest.raises(HandshakeError, match="Expected HANDSHAKE_INIT"):
+        process_handshake_init(invalid_frame, node)
+
+def test_handshake_missing_fields_rejected():
+    """Тест отклонения рукопожатия с неполным набором полей."""
+    node_a = NodeIdentity.generate()
+    node_b = NodeIdentity.generate()
+
+    init_frame, _ = create_handshake_init(node_a, node_b.node_id)
+    data = init_frame.unpack_data()
+    del data["signature"]  # Удаляем подпись
+    corrupted_frame = Frame.pack_data(MessageType.HANDSHAKE_INIT, data)
+
+    with pytest.raises(HandshakeError, match="Malformed HANDSHAKE_INIT"):
+        process_handshake_init(corrupted_frame, node_b)
+
+def test_aead_preserves_custom_flags():
+    """Тест сохранения существующих флагов кадра (например, RESPONSE) при шифровании."""
+    node_a = NodeIdentity.generate()
+    node_b = NodeIdentity.generate()
+
+    init_frame, eph_priv = create_handshake_init(node_a, node_b.node_id)
+    resp_frame, session_b = process_handshake_init(init_frame, node_b)
+    session_a = process_handshake_resp(resp_frame, node_a, eph_priv, node_b.node_id)
+
+    orig = Frame.pack_data(MessageType.APP_ACK, {"ok": True}, flags=FrameFlags.RESPONSE)
+    enc = session_a.encrypt_frame(orig)
+
+    assert bool(enc.flags & FrameFlags.ENCRYPTED)
+    assert bool(enc.flags & FrameFlags.RESPONSE)
+
+    dec = session_b.decrypt_frame(enc)
+    assert bool(dec.flags & FrameFlags.RESPONSE)
+    assert not bool(dec.flags & FrameFlags.ENCRYPTED)
+
+def test_multiple_consecutive_messages_privacy():
+    """Тест серии из 20 последовательных зашифрованных сообщений."""
+    node_a = NodeIdentity.generate()
+    node_b = NodeIdentity.generate()
+
+    init_frame, eph_priv = create_handshake_init(node_a, node_b.node_id)
+    resp_frame, session_b = process_handshake_init(init_frame, node_b)
+    session_a = process_handshake_resp(resp_frame, node_a, eph_priv, node_b.node_id)
+
+    for i in range(20):
+        f = session_a.encrypt_frame(Frame.pack_data(MessageType.APP_MESSAGE, {"index": i}))
+        dec = session_b.decrypt_frame(f)
+        assert dec.unpack_data()["index"] == i
+
+    assert session_a.send_seq == 21
+    assert session_b.last_recv_seq == 20

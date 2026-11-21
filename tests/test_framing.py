@@ -20,8 +20,7 @@ from src.transport.protocol import (
     HEADER_FORMAT
 )
 
-@pytest.mark.asyncio
-async def test_frame_encoding_decoding():
+def test_frame_encoding_decoding():
     request_id = uuid.uuid4().bytes
     original_frame = Frame.pack_data(
         msg_type=MessageType.PING,
@@ -50,8 +49,7 @@ async def test_frame_encoding_decoding():
     unpacked = decoded_frame.unpack_data()
     assert unpacked == {"sender": "node_1", "timestamp": 123456789}
 
-@pytest.mark.asyncio
-async def test_payload_length_exceeded():
+def test_payload_length_exceeded():
     with pytest.raises(PayloadLengthExceededError):
         Frame(msg_type=MessageType.PING, payload=b"X" * (MAX_FRAME_PAYLOAD + 1))
         
@@ -118,8 +116,7 @@ async def test_stream_framing_concatenated_and_partial():
         assert recv_data["seq"] == i
         assert recv_data["content"] == "A" * (i * 50)
 
-@pytest.mark.asyncio
-async def test_invalid_protocol_version():
+def test_invalid_protocol_version():
     """Test protocol version validation"""
     bad_header = struct.pack(
         HEADER_FORMAT,
@@ -132,8 +129,7 @@ async def test_invalid_protocol_version():
     with pytest.raises(InvalidProtocolVersionError):
         Frame.decode_header(bad_header)
 
-@pytest.mark.asyncio
-async def test_invalid_message_type():
+def test_invalid_message_type():
     """Test invalid message type error"""
     bad_header = struct.pack(
         HEADER_FORMAT,
@@ -239,3 +235,103 @@ async def test_dispatcher_error_handling():
     assert sent_frames[0].msg_type == MessageType.ERROR
     assert sent_frames[0].flags == FrameFlags.ERROR
     assert "Simulated handler exception" in sent_frames[0].unpack_data()["error"]
+
+
+# =============================================================================
+# РАСШИРЕННЫЙ НАБОР ТЕСТОВ ЭТАПА 1 (КРАЕВЫЕ СЛУЧАИ И ВАЛИДАЦИЯ)
+# =============================================================================
+
+def test_zero_length_payload_frame():
+    """Тест кадра с нулевой длиной полезной нагрузки (empty payload)."""
+    frame = Frame(msg_type=MessageType.PING, payload=b"")
+    assert frame.payload_length == 0
+    encoded = frame.encode()
+    assert len(encoded) == HEADER_SIZE
+    
+    version, msg_type, flags, req_id, p_len = Frame.decode_header(encoded)
+    assert p_len == 0
+    assert msg_type == MessageType.PING
+    assert frame.unpack_data() is None
+
+def test_max_payload_boundary():
+    """Тест строгой границы полезной нагрузки: ровно 65536 байт допустимо, 65537 - отказ."""
+    # Ровно 64 КБ
+    max_payload = b"A" * MAX_FRAME_PAYLOAD
+    frame = Frame(msg_type=MessageType.APP_MESSAGE, payload=max_payload)
+    assert frame.payload_length == MAX_FRAME_PAYLOAD
+    encoded = frame.encode()
+    assert len(encoded) == HEADER_SIZE + MAX_FRAME_PAYLOAD
+
+    # На 1 байт больше лимита
+    with pytest.raises(PayloadLengthExceededError):
+        Frame(msg_type=MessageType.APP_MESSAGE, payload=b"A" * (MAX_FRAME_PAYLOAD + 1))
+
+def test_frame_request_id_invalid_length():
+    """Тест валидации request_id: строго 16 байт (UUID128)."""
+    with pytest.raises(ValueError, match="request_id must be exactly 16 bytes"):
+        Frame(msg_type=MessageType.PING, request_id=b"short_id")
+    with pytest.raises(ValueError, match="request_id must be exactly 16 bytes"):
+        Frame(msg_type=MessageType.PING, request_id=b"too_long_request_id_32_bytes_len")
+
+def test_frame_custom_flags_combination():
+    """Тест комбинаций битовых флагов кадра (RESPONSE | ENCRYPTED | FRAGMENT)."""
+    combined_flags = FrameFlags.RESPONSE | FrameFlags.ENCRYPTED | FrameFlags.FRAGMENT
+    frame = Frame.pack_data(
+        msg_type=MessageType.APP_MESSAGE,
+        data={"chunk": 1},
+        flags=combined_flags
+    )
+    encoded = frame.encode()
+    version, msg_type, flags, req_id, p_len = Frame.decode_header(encoded)
+    assert bool(flags & FrameFlags.RESPONSE)
+    assert bool(flags & FrameFlags.ENCRYPTED)
+    assert bool(flags & FrameFlags.FRAGMENT)
+    assert not bool(flags & FrameFlags.ERROR)
+
+def test_msgpack_complex_nested_types():
+    """Тест десериализации сложных вложенных структур данных через MessagePack."""
+    complex_data = {
+        "nodes": [
+            {"id": b"\x01" * 32, "host": "127.0.0.1", "port": 8001},
+            {"id": b"\x02" * 32, "host": "127.0.0.1", "port": 8002},
+        ],
+        "meta": {"valid": True, "ratio": 3.14159, "count": 1000},
+        "raw_signature": b"\xff" * 64
+    }
+    frame = Frame.pack_data(MessageType.FIND_NODE_RESPONSE, complex_data)
+    unpacked = frame.unpack_data()
+    assert unpacked == complex_data
+    assert isinstance(unpacked["meta"]["ratio"], float)
+    assert isinstance(unpacked["raw_signature"], bytes)
+
+@pytest.mark.asyncio
+async def test_partial_header_stream_clean_disconnect():
+    """Тест чистого закрытия соединения до передачи полного заголовка (IncompleteReadError -> None)."""
+    class MockReader:
+        async def readexactly(self, n):
+            raise asyncio.IncompleteReadError(b"part", n)
+    class MockWriter:
+        def close(self): pass
+        async def wait_closed(self): pass
+
+    conn = Connection(MockReader(), MockWriter())
+    res = await conn.read_frame()
+    assert res is None
+
+@pytest.mark.asyncio
+async def test_dispatcher_unregistered_handler_sends_error():
+    """Тест диспетчера: обращение к незарегистрированному типу сообщения отправляет ERROR кадр."""
+    dispatcher = Dispatcher()
+    sent_frames = []
+
+    class MockConn:
+        async def send_frame(self, frame: Frame):
+            sent_frames.append(frame)
+
+    frame = Frame.pack_data(MessageType.STORE_REQUEST, {"key": b"123"})
+    await dispatcher.dispatch(MockConn(), frame)
+
+    assert len(sent_frames) == 1
+    assert sent_frames[0].msg_type == MessageType.ERROR
+    assert sent_frames[0].flags == FrameFlags.ERROR
+    assert "No handler" in sent_frames[0].unpack_data()["error"]
