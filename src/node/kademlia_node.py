@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 import uuid
 from typing import List, Tuple, Optional
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class KademliaNode:
     def __init__(self, state_dir: str, host: str, port: int, k_size: int = 4, alpha: int = 3):
+        self.state_dir = state_dir
         self.host = host
         self.port = port
         self.k_size = k_size
@@ -26,6 +28,14 @@ class KademliaNode:
         
         # 2. Инициализируем K-Buckets
         self.routing_table = RoutingTable(self.identity.node_id, k_size)
+        self.routing_table_path = os.path.join(self.state_dir, "routing_table.msgpack")
+        if os.path.exists(self.routing_table_path):
+            restored = self.routing_table.load_from_file(self.routing_table_path)
+            if restored:
+                logger.info(
+                    f"[{self.node_id_hex}] Восстановлено {self.routing_table.total_contacts_count()} "
+                    f"контактов из сохраненного состояния {self.routing_table_path}"
+                )
         
         # 3. Инициализируем локальное хранилище DHT и RPC
         self.storage = DHTStorage()
@@ -37,6 +47,17 @@ class KademliaNode:
         self.server = None
         self._current_sequence_number = 1
         self._bg_tasks: List[asyncio.Task] = []
+
+    def save_routing_table_state(self):
+        """Сохраняет текущую таблицу маршрутизации на диск (E2-7: Routing Table Persistence)."""
+        try:
+            self.routing_table.save_to_file(self.routing_table_path)
+            logger.info(
+                f"[{self.node_id_hex}] Сохранено {self.routing_table.total_contacts_count()} "
+                f"контактов в {self.routing_table_path}"
+            )
+        except Exception as e:
+            logger.warning(f"[{self.node_id_hex}] Ошибка сохранения таблицы маршрутизации: {e}")
 
     async def start(self):
         """Запускает TCP-сервер узла."""
@@ -57,6 +78,9 @@ class KademliaNode:
         logger.info(f"[{self.node_id_hex}] Узел запущен на {self.host}:{self.port}")
 
     async def stop(self):
+        # 1. Сохраняем состояние таблицы маршрутизации перед остановкой (E2-7)
+        self.save_routing_table_state()
+        
         for task in self._bg_tasks:
             task.cancel()
         if self._bg_tasks:

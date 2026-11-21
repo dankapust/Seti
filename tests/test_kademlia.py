@@ -482,3 +482,72 @@ def test_kbucket_remove_contact():
     # Удаляем c2
     bucket.remove_contact(c2.node_id)
     assert len(bucket.contacts) == 0
+
+def test_routing_table_save_and_load_persistence():
+    """
+    Тест критерия E2-7: Персистентность и сериализация таблицы маршрутизации на диск.
+    Сохранение таблицы в бинарный файл msgpack и полное восстановление при перезапуске.
+    """
+    my_id = b"\x01" * 32
+    table = RoutingTable(my_id, k_size=4)
+
+    # Добавляем 3 контакта
+    c1 = make_test_contact(8001)
+    c2 = make_test_contact(8002)
+    c3 = make_test_contact(8003)
+    c1.mark_verified()
+    table.add_contact(c1)
+    table.add_contact(c2)
+    table.add_contact(c3)
+    assert table.total_contacts_count() == 3
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        save_path = os.path.join(tmp_dir, "table_backup.msgpack")
+        table.save_to_file(save_path)
+        assert os.path.exists(save_path)
+        assert os.path.getsize(save_path) > 0
+
+        # Создаем новую чистую таблицу
+        restored_table = RoutingTable(my_id, k_size=4)
+        assert restored_table.total_contacts_count() == 0
+
+        # Загружаем из файла
+        loaded = restored_table.load_from_file(save_path)
+        assert loaded is True
+        assert restored_table.total_contacts_count() == 3
+
+        # Проверяем идентичность восстановленных контактов
+        closest = restored_table.get_closest_contacts(b"\x00" * 32, limit=10)
+        closest_ids = {c.node_id for c in closest}
+        assert c1.node_id in closest_ids
+        assert c2.node_id in closest_ids
+        assert c3.node_id in closest_ids
+
+@pytest.mark.asyncio
+async def test_kademlia_node_routing_table_persistence_across_restarts():
+    """
+    Тест критерия E2-7 на уровне KademliaNode:
+    Узел сохраняет контакты при остановке и автоматически загружает их при повторном запуске.
+    """
+    with tempfile.TemporaryDirectory() as state_dir:
+        # 1. Первый запуск узла
+        node1 = KademliaNode(state_dir, "127.0.0.1", 9950, k_size=4)
+        c1 = make_test_contact(9951)
+        c2 = make_test_contact(9952)
+        node1.routing_table.add_contact(c1)
+        node1.routing_table.add_contact(c2)
+        assert node1.routing_table.total_contacts_count() == 2
+
+        # Останавливаем узел (сохраняет routing_table.msgpack)
+        await node1.stop()
+        assert os.path.exists(node1.routing_table_path)
+
+        # 2. Перезапуск узла в том же каталоге состояния
+        node2 = KademliaNode(state_dir, "127.0.0.1", 9950, k_size=4)
+        # Таблица должна автоматически содержать сохраненные контакты!
+        assert node2.routing_table.total_contacts_count() == 2
+        restored_ids = {c.node_id for c in node2.routing_table.get_closest_contacts(b"\x00" * 32, limit=10)}
+        assert c1.node_id in restored_ids
+        assert c2.node_id in restored_ids
+        await node2.stop()
+

@@ -2,6 +2,10 @@ import asyncio
 import logging
 import sys
 import os
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import shutil
 import hashlib
 from src.node.kademlia_node import KademliaNode
@@ -141,6 +145,33 @@ async def run_stage2():
     # Завершение работы цепочки
     for n in chain_nodes:
         await n.stop()
+
+    # -------------------------------------------------------------
+    # 5. ПЕРСИСТЕНТНОСТЬ ТАБЛИЦЫ МАРШРУТИЗАЦИИ (E2-7)
+    # -------------------------------------------------------------
+    print("\n--- ТЕСТ 5: СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ТАБЛИЦЫ МАРШРУТИЗАЦИИ (E2-7) ---")
+    persist_dir = "./state/persist_test_node"
+    node_p1 = KademliaNode(persist_dir, "127.0.0.1", 9150, k_size=4)
+    # Имитируем наполнение таблицы маршрутизации
+    for p in [9151, 9152, 9153]:
+        dummy_pub = hashlib.sha256(f"node_{p}".encode()).digest()
+        dummy_id = hashlib.sha256(dummy_pub).digest()
+        node_p1.routing_table.add_contact(
+            Contact(dummy_id, "Ed25519", dummy_pub, "127.0.0.1", p)
+        )
+    print(f"До остановки: в таблице узла 9150 содержится {node_p1.routing_table.total_contacts_count()} контактов.")
+    await node_p1.stop()
+    print(f"Состояние успешно сброшено в файл: {node_p1.routing_table_path}")
+
+    # Создаем новый экземпляр в том же каталоге (перезапуск узла)
+    node_p2 = KademliaNode(persist_dir, "127.0.0.1", 9150, k_size=4)
+    restored_count = node_p2.routing_table.total_contacts_count()
+    print(f"После перезапуска: автоматически восстановлено {restored_count} контактов без повторного bootstrap!")
+    if restored_count == 3:
+        print("[SUCCESS] Персистентность таблицы маршрутизации (E2-7) полностью подтверждена!")
+    else:
+        print(f"[FAIL] Восстановлено неожиданное число контактов: {restored_count}")
+    await node_p2.stop()
 
     print("\n" + "=" * 80)
     print(" [STAGE 2 DEMO COMPLETED SUCCESSFULLY]")

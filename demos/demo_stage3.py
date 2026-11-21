@@ -2,6 +2,10 @@ import asyncio
 import logging
 import sys
 import os
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import shutil
 import time
 from src.node.kademlia_node import KademliaNode

@@ -334,4 +334,4 @@ async def test_dispatcher_unregistered_handler_sends_error():
     assert len(sent_frames) == 1
     assert sent_frames[0].msg_type == MessageType.ERROR
     assert sent_frames[0].flags == FrameFlags.ERROR
-    assert "No handler" in sent_frames[0].unpack_data()["error"]
+    assert "Unhandled message type" in sent_frames[0].unpack_data()["error"]

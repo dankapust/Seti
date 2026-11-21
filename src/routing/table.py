@@ -126,3 +126,67 @@ class RoutingTable:
     def total_contacts_count(self) -> int:
         """Общее число уникальных контактов во всей таблице маршрутизации."""
         return sum(len(b.contacts) for b in self.buckets)
+
+    def dump_contacts(self) -> List[dict]:
+        """Сериализует все известные контакты таблицы маршрутизации для сохранения на диск (E2-7)."""
+        contacts = []
+        for bucket in self.buckets:
+            for c in bucket.contacts:
+                contacts.append({
+                    "node_id": c.node_id,
+                    "identity_algorithm": c.identity_algorithm,
+                    "identity_public_key": c.identity_public_key,
+                    "host": c.host,
+                    "port": c.port,
+                    "last_seen_ms": c.last_seen_ms,
+                    "last_verified_ms": c.last_verified_ms
+                })
+        return contacts
+
+    def load_contacts(self, contacts_data: List[dict]):
+        """Загружает сохраненные контакты в таблицу маршрутизации с валидацией идентичности."""
+        for item in contacts_data:
+            try:
+                c = Contact(
+                    node_id=item["node_id"],
+                    identity_algorithm=item["identity_algorithm"],
+                    identity_public_key=item["identity_public_key"],
+                    host=item["host"],
+                    port=item["port"]
+                )
+                c.last_seen_ms = item.get("last_seen_ms", c.last_seen_ms)
+                c.last_verified_ms = item.get("last_verified_ms", c.last_verified_ms)
+                if c.validate_identity():
+                    self.add_contact(c)
+            except Exception:
+                continue
+
+    def save_to_file(self, file_path: str):
+        """Сохраняет таблицу маршрутизации на диск (E2-7: Routing Table Persistence)."""
+        import os
+        import msgpack
+        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+        data = {
+            "version": 1,
+            "local_node_id": self.local_node_id,
+            "k_size": self.k_size,
+            "contacts": self.dump_contacts()
+        }
+        with open(file_path, "wb") as f:
+            f.write(msgpack.packb(data, use_bin_type=True))
+
+    def load_from_file(self, file_path: str) -> bool:
+        """Загружает сохраненную таблицу маршрутизации с диска (E2-7)."""
+        import os
+        import msgpack
+        if not os.path.exists(file_path):
+            return False
+        try:
+            with open(file_path, "rb") as f:
+                data = msgpack.unpackb(f.read(), raw=False)
+            if isinstance(data, dict) and "contacts" in data:
+                self.load_contacts(data["contacts"])
+                return True
+        except Exception:
+            return False
+        return False
