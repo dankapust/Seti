@@ -101,13 +101,23 @@ python demos/demo_stage4.py
 python demos/demo_stage5.py
 ```
 
+#### Сквозная демонстрация всех 5 этапов разом (`demos/demo_all.py`)
+Последовательно запускает все демонстрационные сценарии этапов 1–5 подряд с итоговым таймингом:
+```bash
+python demos/demo_all.py
+```
+
 ---
 
 ### Запуск демонстраций в Docker
 ```bash
+# Запуск демонстрации конкретного этапа:
 docker-compose run --rm stage1_demo
 docker-compose run --rm stage2_demo
 docker-compose run --rm stage3_demo
 docker-compose run --rm stage4_demo
 docker-compose run --rm stage5_demo
+
+# Запуск полной сквозной демонстрации всех этапов подряд:
+docker-compose run --rm all_demos
 ```

@@ -97,3 +97,12 @@ services:
     environment:
       - PYTHONPATH=/app
 
+  all_demos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seti_all_demos
+    command: ["python", "demos/demo_all.py"]
+    environment:
+      - PYTHONPATH=/app
+
